@@ -251,7 +251,7 @@ def _process_one(filepath, grade, process_fn, loaded_hashes):
 
     # Check in-memory hash cache first — avoids computing MD5 for unchanged files
     try:
-        from app import _hash_cache, _hash_cache_lock
+        from .app import _hash_cache, _hash_cache_lock
         with _hash_cache_lock:
             cached_hash = _hash_cache.get(norm)
         if cached_hash is not None:
@@ -347,7 +347,7 @@ def scan_folder(folder, cfg, process_fn, get_loaded_hashes_fn):
     # Pre-load all known hashes into memory in one query — avoids one DB
     # roundtrip per file (important when processing hundreds of files)
     try:
-        from app import _load_all_hashes
+        from .app import _load_all_hashes
         _load_all_hashes()
         log.info('Hash cache pre-loaded')
     except Exception:

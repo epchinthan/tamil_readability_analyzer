@@ -1,0 +1,1 @@
+"""Tamil Readability Analyzer package."""
