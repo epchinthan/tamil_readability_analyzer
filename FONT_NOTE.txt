@@ -1,0 +1,1 @@
+Tamil fonts are not bundled in this archive. The app uses system font fallbacks such as Noto Sans Tamil, Nirmala UI, Latha, and sans-serif. If Tamil rendering is poor, install Noto Sans Tamil on your system.

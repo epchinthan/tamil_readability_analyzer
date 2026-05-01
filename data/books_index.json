@@ -1,0 +1,142 @@
+[
+  {
+    "book_name": "batch_b.txt",
+    "updated_at": "2026-04-28 20:45:33",
+    "recommended_grade": 8,
+    "recommended_age": "13–14",
+    "confidence_pct": 95,
+    "class_scores": {
+      "3": 40.0,
+      "5": 40.0,
+      "8": 100.0
+    },
+    "word_scores": {
+      "3": 0.0,
+      "5": 0.0,
+      "8": 100.0
+    },
+    "meaning_scores": {
+      "3": 0.0,
+      "5": 0.0,
+      "8": 100.0
+    },
+    "sentence_scores": {
+      "3": 100.0,
+      "5": 100.0,
+      "8": 100.0
+    },
+    "progression_quality": "Smooth"
+  },
+  {
+    "book_name": "batch_a.txt",
+    "updated_at": "2026-04-28 20:45:33",
+    "recommended_grade": 3,
+    "recommended_age": "8–9",
+    "confidence_pct": 70.0,
+    "class_scores": {
+      "3": 80.0,
+      "5": 80.0,
+      "8": 80.0
+    },
+    "word_scores": {
+      "3": 66.7,
+      "5": 66.7,
+      "8": 66.7
+    },
+    "meaning_scores": {
+      "3": 66.7,
+      "5": 66.7,
+      "8": 66.7
+    },
+    "sentence_scores": {
+      "3": 100.0,
+      "5": 100.0,
+      "8": 100.0
+    },
+    "progression_quality": "Smooth"
+  },
+  {
+    "book_name": "advanced_book.txt",
+    "updated_at": "2026-04-28 20:45:33",
+    "recommended_grade": 8,
+    "recommended_age": "13–14",
+    "confidence_pct": 85,
+    "class_scores": {
+      "3": 39.7,
+      "5": 25.3,
+      "8": 70.0
+    },
+    "word_scores": {
+      "3": 0.0,
+      "5": 0.0,
+      "8": 50.0
+    },
+    "meaning_scores": {
+      "3": 0.0,
+      "5": 0.0,
+      "8": 50.0
+    },
+    "sentence_scores": {
+      "3": 100.0,
+      "5": 42.5,
+      "8": 100.0
+    },
+    "progression_quality": "Smooth"
+  },
+  {
+    "book_name": "simple_story.txt",
+    "updated_at": "2026-04-28 20:45:33",
+    "recommended_grade": 8,
+    "recommended_age": "13–14",
+    "confidence_pct": 84.3,
+    "class_scores": {
+      "3": 65.7,
+      "5": 68.5,
+      "8": 82.8
+    },
+    "word_scores": {
+      "3": 42.9,
+      "5": 71.4,
+      "8": 71.4
+    },
+    "meaning_scores": {
+      "3": 42.9,
+      "5": 71.4,
+      "8": 71.4
+    },
+    "sentence_scores": {
+      "3": 100.0,
+      "5": 42.5,
+      "8": 100.0
+    },
+    "progression_quality": "Smooth"
+  },
+  {
+    "book_name": "easy_book.txt",
+    "updated_at": "2026-04-28 20:44:51",
+    "recommended_grade": 3,
+    "recommended_age": "8–9",
+    "confidence_pct": 70.0,
+    "class_scores": {
+      "3": 85.0,
+      "5": 60.0,
+      "8": 85.0
+    },
+    "word_scores": {
+      "3": 75.0,
+      "5": 75.0,
+      "8": 75.0
+    },
+    "meaning_scores": {
+      "3": 75.0,
+      "5": 75.0,
+      "8": 75.0
+    },
+    "sentence_scores": {
+      "3": 100.0,
+      "5": 0.0,
+      "8": 100.0
+    },
+    "progression_quality": "Smooth"
+  }
+]

@@ -1,0 +1,28 @@
+# Local environment
+.venv/
+.install_complete
+.codex
+config.json
+__pycache__/
+*.py[cod]
+
+# Generated logs, uploads, reports, and imported files
+logs/
+uploads/
+reports/
+textbooks_imported/
+
+# Local databases and caches
+*.db
+*.sqlite
+*.sqlite3
+data/cache/
+
+# Downloaded/built third-party ASR dependency.
+# start.sh recreates this on first startup when needed.
+tools/whisper.cpp/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+*.swp

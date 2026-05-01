@@ -1,0 +1,13 @@
+{
+  "watch_folder": "",
+  "mappings": {},
+  "auto_grade_from_name": true,
+  "use_subfolders": true,
+  "max_workers": 8,
+  "ai": {
+    "enabled": false,
+    "provider": "ollama",
+    "model": "qwen2.5:7b-instruct",
+    "base_url": "http://127.0.0.1:11434"
+  }
+}
