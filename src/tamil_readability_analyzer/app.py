@@ -1,4 +1,5 @@
-import os, re, json, sqlite3, datetime, io, math, hashlib, threading, logging, uuid, time
+import os, re, json, random, sqlite3, datetime, io, math, hashlib, threading, logging, uuid, time
+from pathlib import Path
 import werkzeug.utils
 from . import analytics as _analytics
 from . import meaning_kb as _meaning_kb
@@ -17,7 +18,8 @@ from flask import Flask, request, jsonify, render_template, send_file
 from .ollama_client import ollama_health, tamil_author_rewrite, tamil_simple_explanation, tamil_lesson_plan, tamil_questions, generate, DEFAULT_MODEL, DEFAULT_BASE_URL
 from werkzeug.utils import secure_filename
 
-app = Flask(__name__)
+REPO_ROOT = Path(__file__).resolve().parents[2]
+app = Flask(__name__, template_folder=str(REPO_ROOT / 'templates'))
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024
 app.config['UPLOAD_FOLDER'] = 'uploads'
 DB_PATH = 'tamil_analyzer.db'
@@ -284,6 +286,14 @@ def init_db():
             audio_path      TEXT,
             created_at      TEXT
         );
+        CREATE TABLE IF NOT EXISTS reading_passages (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            grade           INTEGER NOT NULL,
+            source          TEXT NOT NULL,  -- 'textbook', 'children', 'default'
+            text            TEXT NOT NULL,
+            word_count      INTEGER DEFAULT 0,
+            created_at      TEXT DEFAULT CURRENT_TIMESTAMP
+        );
         CREATE INDEX IF NOT EXISTS idx_grade_words_grade ON grade_words(grade);
         CREATE INDEX IF NOT EXISTS idx_grade_words_word  ON grade_words(word);
         CREATE INDEX IF NOT EXISTS idx_grade_files_grade ON grade_files(grade);
@@ -355,13 +365,272 @@ def _tesseract_languages():
         pass
     return 'tam'
 
+def _repair_tamil_ocr_glyph_patterns(text):
+    """Repair recurring Tamil OCR glyph confusions before word-level cleanup."""
+    replacements = [
+        ('மமாத்த', 'மொத்த'),
+        ('மசய்', 'செய்'),
+        ('மசய', 'செய'),
+        ('மசல்', 'செல்'),
+        ('மசல்வ', 'செல்வ'),
+        ('மசால்', 'சொல்'),
+        ('மசாற்', 'சொற்'),
+        ('மபய', 'பெய'),
+        ('மபற', 'பெற'),
+        ('மபண்', 'பெண்'),
+        ('மபாருள்', 'பொருள்'),
+        ('மபாழு', 'பொழு'),
+        ('பபா', 'போ'),
+        ('பபாற்', 'போற்'),
+        ('பபருணவு', 'பேருணவு'),
+        ('பபான', 'போன'),
+        ('பபால்', 'போல்'),
+        ('பவண்', 'வேண்'),
+        ('மவளி', 'வெளி'),
+        ('மவல்', 'வெல்'),
+        ('மவறு', 'வேறு'),
+        ('மநய்', 'நெய்'),
+        ('மநல்', 'நெல்'),
+        ('மநடு', 'நெடு'),
+        ('மதாட', 'தொட'),
+        ('மதாை', 'தொட'),
+        ('மதால', 'தொல'),
+        ('மதன்', 'தென்'),
+        ('மமய்', 'மெய்'),
+        ('மமாழி', 'மொழி'),
+        ('மமழு', 'மெழு'),
+        ('மறற', 'மற'),
+        ('முறற', 'முறை'),
+        ('வறக', 'வகை'),
+        ('பறட', 'படை'),
+        ('பறழ', 'பழை'),
+        ('அறமந்த', 'அமைந்த'),
+        ('உதவிறய', 'உதவியை'),
+        ('உண்றம', 'உண்மை'),
+        ('இல்றல', 'இல்லை'),
+        ('இன்றறய', 'இன்றைய'),
+        ('இத்தறகய', 'இத்தகைய'),
+        ('எவ்வாபறா', 'எவ்வாறோ'),
+        ('கிறட', 'கிடை'),
+        ('நறட', 'நடை'),
+        ('பாறன', 'பானை'),
+        ('விருந்பதாம்ப', 'விருந்தோம்ப'),
+        ('விருந்தினறர', 'விருந்தினரை'),
+        ('நாள்பதாறும்', 'நாள்தோறும்'),
+        ('யாறவ', 'யாவை'),
+        ('எரவயைனும்', 'எவையேனும்'),
+        ('இைங்கரை', 'இடங்களை'),
+        ('குறிப்புகரை', 'குறிப்புகளை'),
+        ('பழகமொழிகரை', 'பழமொழிகளை'),
+        ('அரமத்து', 'அமைத்து'),
+        ('பைன்படுத்தி', 'பயன்படுத்தி'),
+        ('அதரன', 'அதனை'),
+        ('உரிை', 'உரிய'),
+        ('விரைகரை', 'விடைகளை'),
+        ('விடைகரை', 'விடைகளை'),
+        ('ெிலப்பதிகொைம்', 'சிலப்பதிகாரம்'),
+        ('பரிப்பொைல்', 'பரிபாடல்'),
+        ('மதுரைக்கொஞ்ெி', 'மதுரைக்காஞ்சி'),
+        ('அமமரிக்கா', 'அமெரிக்கா'),
+        ('அடமந்துள்ள', 'அமைந்துள்ள'),
+        ('பீட்ைா', 'பீட்டா'),
+        ('தசரன்', 'சேரன்'),
+        ('நெடுஞ்தசரலாத', 'நெடுஞ்சேரலாத'),
+        ('மசங்குட்டுவ', 'செங்குட்டுவ'),
+        ('கைற்படை', 'கடற்படை'),
+        ('கைம்ப', 'கடம்ப'),
+        ('மகாள்டளய', 'கொள்ளைய'),
+        ('ர்கடள', 'ர்களை'),
+        ('கடள', 'களை'),
+        ('மநல்மணிகளை', 'நெல்மணிகளை'),
+        ('தபாது', 'போது'),
+        ('ெொன்று', 'சான்று'),
+        ('மாவிடல', 'மாவிலை'),
+        ('கெய்க', 'செய்க'),
+        ('மடற', 'மறை'),
+        ('தநர்', 'நேர்'),
+        ('விடன', 'வினை'),
+        ('யகொடிட்ை', 'கோடிட்ட'),
+        ('இைத்ரத', 'இடத்தை'),
+        ('நிைப்புக', 'நிரப்புக'),
+        ('இலக்கிைம்', 'இலக்கியம்'),
+        ('ெீர்கைொல்', 'சீர்களால்'),
+        ('கெய்யுரை', 'செய்யுளை'),
+        ('கதரிவு', 'தெரிவு'),
+        ('வினொக்கைில்', 'வினாக்களில்'),
+        ('இைண்ைனுக்கு', 'இரண்டனுக்கு'),
+        ('விரைைைி', 'விடையளி'),
+        ('வடதப்பைலம்', 'வதைப்படலம்'),
+        ('உலக்டகயால்', 'உலக்கையால்'),
+        ('பிடழகள்', 'பிழைகள்'),
+        ('கதொைர்ந்து', 'தொடர்ந்து'),
+        ('கூறிைவொறு', 'கூறியவாறு'),
+        ('அன்மொழித்தொடக', 'அன்மொழித்தொகை'),
+        ('வழுவடமதி', 'வழுவமைதி'),
+        ('தவற்றுடமத்தொடக', 'வேற்றுமைத்தொகை'),
+        ('ஒற்றளமபடை', 'ஒற்றளபெடை'),
+        ('உம்டமத்தொடக', 'உம்மைத்தொகை'),
+        ('வினையாலடணயும்', 'வினையாலணையும்'),
+        ('வாழ்வாடன', 'வாழ்வானை'),
+        ('தபான்ற', 'போன்ற'),
+        ('கெய்யுள்', 'செய்யுள்'),
+        ('எலிப்மபாறி', 'எலிப்பொறி'),
+        ('தன்னலபம', 'தன்னலமே'),
+        ('பாராட்டிபயா', 'பாராட்டியோ'),
+        ('எதிர்பார்த்பதா', 'எதிர்பார்த்தோ'),
+        ('கருதிபயா', 'கருதியோ'),
+        ('றவப்பது', 'வைப்பது'),
+        ('என்பதாபலபய', 'என்பதாலேயே'),
+        ('அன்பறா', 'அன்றோ'),
+        ('ஏறழ', 'ஏழை'),
+        ('விழாக்கறள', 'விழாக்களை'),
+        ('மட்டுபம', 'மட்டுமே'),
+        ('காக்றகயும்', 'காக்கையும்'),
+        ('பண்றட', 'பண்டை'),
+        ('பண்டிறக', 'பண்டிகை'),
+        ('புகறழ', 'புகழை'),
+        ('பாராட்றட', 'பாராட்டை'),
+        ('பெயறர', 'பெயரை'),
+        ('விருந்தோம்பறல', 'விருந்தோம்பலை'),
+        ('அண்றட', 'அண்டை'),
+        ('ீட்டார', 'வீட்டார'),
+        ('ஆதாரங்கறள', 'ஆதாரங்களை'),
+        ('ஆதாரங்களை்க', 'ஆதாரங்களைக்'),
+        ('உறரத்த', 'உரைத்த'),
+        ('சான்றுகறள', 'சான்றுகளை'),
+        ('முன்பப', 'முன்பே'),
+        ('கீறழ', 'கீழை'),
+        ('பமறலநாடுகளுடன்', 'மேலைநாடுகளுடன்'),
+        ('பமற்மகாண்ட', 'மேற்கொண்ட'),
+        ('மதுறரக்காஞ்சி', 'மதுரைக்காஞ்சி'),
+        ('பறறசாற்றி', 'பறைசாற்றி'),
+        ('உண்மைறய', 'உண்மையை'),
+        ('இறடப்பட்டது', 'இடைப்பட்டது'),
+        ('பெற்றிருந்தறத', 'பெற்றிருந்ததை'),
+        ('சிவகறள', 'சிவகளை'),
+        ('நெல்மணிகறள', 'நெல்மணிகளை'),
+        ('மகாற்றக', 'கொற்கை'),
+        ('பமற்கத்திய', 'மேற்கத்திய'),
+        ('மவள்ளி', 'வெள்ளி'),
+        ('நடைபெற்றறமக்கு', 'நடைபெற்றமைக்கு'),
+        ('நம்முறடய', 'நம்முடைய'),
+        ('மதான்றமறய', 'தொன்மையை'),
+        ('பமன்றமறயயும்', 'மேன்மையையும்'),
+        ('மாமபரும்', 'மாபெரும்'),
+        ('நெடுஞ்பசரலாத', 'நெடுஞ்சேரலாத'),
+        ('பசரன்', 'சேரன்'),
+        ('கடம்பக்மகாள்றளயர்கறள', 'கடம்பக்கொள்ளையர்களை'),
+        ('மகாண்டிருந்த', 'கொண்டிருந்த'),
+        ('எத்தறன', 'எத்தனை'),
+        ('றக', 'கை'),
+        ('இறசத்தாய்', 'இசைத்தாய்'),
+        ('மதாக்க', 'தொக்க'),
+        ('மதாறக', 'தொகை'),
+        ('மறல', 'மலை'),
+        ('தென்னஞ்மசடி', 'தென்னஞ்செடி'),
+        ('இறல', 'இலை'),
+        ('மாவிறல', 'மாவிலை'),
+        ('ஓறல', 'ஓலை'),
+        ('விறனமுற்று', 'வினைமுற்று'),
+        ('மசன்ற', 'சென்ற'),
+        ('பகாறத', 'கோதை'),
+        ('வாய்றபெய', 'வாய்மையே'),
+        ('செய்யுளிறச', 'செய்யுளிசை'),
+        ('அளபெறட', 'அளபெடை'),
+        ('உரனறசஇ', 'உரைநசைஇ'),
+        ('ஐந்மதாறக', 'ஐந்தொகை'),
+        ('புறத்பத', 'புறத்தே'),
+        ('பவறு', 'வேறு'),
+        ('பவற்றுறம', 'வேற்றுமை'),
+        ('உவறம', 'உவமை'),
+        ('உம்றம', 'உம்மை'),
+        ('காலத்றத', 'காலத்தை'),
+        ('உறடய', 'உடைய'),
+        ('திறண', 'திணை'),
+        ('முல்றல', 'முல்லை'),
+        ('பாறல', 'பாலை'),
+        ('விறட', 'விடை'),
+        ('மதாழிற்பெயர்', 'தொழிற்பெயர்'),
+        ('படர்க்றக', 'படர்க்கை'),
+        ('யாபனா', 'யானோ'),
+        ('இறடச்சொல்', 'இடைச்சொல்'),
+        ('மெய்யளபெறட', 'மெய்யளபெடை'),
+        ('உயிரளபெறட', 'உயிரளபெடை'),
+        ('பெயமரச்ச', 'பெயரெச்ச'),
+        ('இக்பகள்விக்கு', 'இக்கேள்விக்கு'),
+        ('உறரத்தல்', 'உரைத்தல்'),
+        ('குடித்பதன்', 'குடித்தேன்'),
+        ('உண்ணவில்றல', 'உண்ணவில்லை'),
+        ('எலிறய', 'எலியை'),
+        ('மபாறி', 'பொறி'),
+        ('உடன்மதாக்க', 'உடன்தொக்க'),
+        ('மபாய்றக', 'பொய்கை'),
+        ('நீர்நிறல', 'நீர்நிலை'),
+        ('சுறனநீர்', 'சுனைநீர்'),
+        ('எள்றள', 'எள்ளை'),
+        ('மபாதுமொழி', 'பொதுமொழி'),
+        ('எத்தன்றம', 'எத்தன்மை'),
+        ('தறிவு', 'தெரிவு'),
+        ('மதரிவ', 'தெரிவ'),
+        ('மகடும்', 'கெடும்'),
+        ('பவந்தன்', 'வேந்தன்'),
+        ('பசர்வாறன', 'சேர்வானை'),
+        ('உள்ளை', 'உள்ள'),
+        ('பெற்றுள்ளை', 'பெற்றுள்ள'),
+        ('எறதப்போன்று', 'எதைப்போன்று'),
+        ('கடப்பாறரயால்', 'கடப்பாரையால்'),
+        ('அறரப்பது', 'அரைப்பது'),
+        ('தமிழன்றனறய', 'தமிழன்னையை'),
+        ('பாவலபரறு', 'பாவலரேறு'),
+        ('முல்றலப்பாட்டு', 'முல்லைப்பாட்டு'),
+        ('செய்திகறள', 'செய்திகளை'),
+        ('அம்மாறன', 'அம்மானை'),
+        ('வறுறம', 'வறுமை'),
+        ('உறடயது', 'உடையது'),
+        ('என்பறத', 'என்பதை'),
+        ('புயலிபல', 'புயலிலே'),
+        ('நம்பிக்றக', 'நம்பிக்கை'),
+        ('சிறுகறத', 'சிறுகதை'),
+        ('கீழ்க்கொணும்', 'கீழ்க்காணும்'),
+        ('பார்றவ', 'பார்வை'),
+        ('காக்றக', 'காக்கை'),
+        ('சுறரக்காய்', 'சுரைக்காய்'),
+        ('மனவளத்றத', 'மனவளத்தை'),
+        ('மகாள்ளும்', 'கொள்ளும்'),
+        ('அறவொழி', 'அறவழி'),
+        ('நறுமுரக', 'நறுமுகை'),
+        ('சுைர்', 'சுடர்'),
+        ('குடிைிருப்பு', 'குடியிருப்பு'),
+        ('யமற்கு', 'மேற்கு'),
+        ('கென்ரன', 'சென்னை'),
+        ('எனக்மகாள்க', 'எனக்கொள்க'),
+        ('முன்னுறர', 'முன்னுரை'),
+        ('வாமனாலி', 'வானொலி'),
+        ('மதாறலக்காட்சி', 'தொலைக்காட்சி'),
+        ('வறலத்தளங்கள்', 'வலைத்தளங்கள்'),
+        ('நன்றமகள்', 'நன்மைகள்'),
+        ('விறளவுகள்', 'விளைவுகள்'),
+        ('முடிவுறர', 'முடிவுரை'),
+        ('முன்பதான்றி', 'முன்தோன்றி'),
+        ('பழறமயும்', 'பழமையும்'),
+        ('புதுறமயும்', 'புதுமையும்'),
+        ('இறணய', 'இணைய'),
+        ('வரதட்சறண', 'வரதட்சணை'),
+        ('அறடயும்', 'அடையும்'),
+    ]
+    for wrong, right in replacements:
+        text = text.replace(wrong, right)
+    return text
+
 def _fix_common_tamil_ocr_errors(text):
     """Conservative Tamil OCR cleanup; add verified textbook-specific fixes here."""
     text = _normalize_tamil_text(text)
+    text = _repair_tamil_ocr_glyph_patterns(text)
     corrections = {
         'புதுரமயான': 'புதுமையான',
         'வடிவரமப்பு': 'வடிவமைப்பு',
         'பபாருள்': 'பொருள்',
+        'மபாருள்': 'பொருள்',
         'மறறும்': 'மற்றும்',
         'குழநரதைகளின்': 'குழந்தைகளின்',
         'உைவியல்': 'உளவியல்',
@@ -376,14 +645,87 @@ def _fix_common_tamil_ocr_errors(text):
         'தைதும்ப': 'ததும்ப',
         'நுரழவீரகள்': 'நுழைவீர்கள்',
         'நம்புகிபைாம்': 'நம்புகிறோம்',
+        'உரைநரை': 'உரைநடை',
+        'பகுதிரை': 'பகுதியை',
+        'ககொடுக்கப்பட்ை': 'கொடுக்கப்பட்ட',
+        'கொடுக்கப்பட்ை': 'கொடுக்கப்பட்ட',
+        'கதரிவுகெய்': 'தெரிவுசெய்',
+        'தெரிவுகெய்': 'தெரிவுசெய்',
+        'வினொக்களுக்கு': 'வினாக்களுக்கு',
+        'விரை': 'விடை',
+        'மசல்வமும்': 'செல்வமும்',
+        'மசல்வாக்கும்': 'செல்வாக்கும்',
+        'நாள்ததாறும்': 'நாள்தோறும்',
+        'பத்திரை': 'பகுதியை',
+        'மதிப்மபண்': 'மதிப்பெண்',
+        'மதிப்மபண்கள்': 'மதிப்பெண்கள்',
+        'முழுமதிப்மபண்': 'முழுமதிப்பெண்',
+        'துரணப்பொைம்': 'துணைப்பாடம்',
+        'துரணப்பொை': 'துணைப்பாட',
+        'துடண': 'துணை',
+        'முன்னுடர': 'முன்னுரை',
+        'முடிவுடர': 'முடிவுரை',
+        'மபாருளுடர': 'பொருளுரை',
+        'பொருளுடர': 'பொருளுரை',
+        'தடலப்புகளுைன்': 'தலைப்புகளுடன்',
+        'தடலப்புைன்': 'தலைப்புடன்',
+        'தடலப்பு': 'தலைப்பு',
+        'உட்தடலப்புகளுைன்': 'உட்தலைப்புகளுடன்',
+        'பரைப்பொற்றல்': 'படைப்பாற்றல்',
+        'கொட்ெிரை': 'காட்சியை',
+        'ககொண்டு': 'கொண்டு',
+        'மசாற்களுக்கு': 'சொற்களுக்கு',
+        'குடறயாத': 'குறையாத',
+        'மதாைர்களும்': 'தொடர்களும்',
+        'மதாைர்': 'தொடர்',
+        'முரற': 'முறை',
+        'முரகை்': 'முறை',
+        'மபறுநர்': 'பெறுநர்',
+        'உள்ளைக்கம்': 'உள்ளடக்கம்',
+        'உள்ளக்கம்': 'உள்ளடக்கம்',
+        'இைம்': 'இடம்',
+        'தததி': 'தேதி',
+        'உடறதமல்முகவரி': 'உறைமேல்முகவரி',
+        'தகட்ைல்': 'கேட்டல்',
+        'பகுதிைின்': 'பகுதியின்',
+        'ஏயதனும்': 'ஏதேனும்',
+        'குறிப்புகரை': 'குறிப்புகளை',
+        'தமற்தகாள்': 'மேற்கோள்',
+        'கட்டுடர': 'கட்டுரை',
+        'பிடழயின்றி': 'பிழையின்றி',
+        'குடறந்த': 'குறைந்த',
     }
     for wrong, right in corrections.items():
         text = text.replace(wrong, right)
+    whole_word_corrections = {
+        'பாடல': 'பாடல்',
+    }
+    for wrong, right in whole_word_corrections.items():
+        text = re.sub(rf'(?<![\u0B80-\u0BFF]){re.escape(wrong)}(?![\u0B80-\u0BFF])', right, text)
+    text = text.replace('நகரில்அமைந்துள்ள', 'நகரில் அமைந்துள்ள')
     return text
+
+def _looks_like_poor_tamil_extraction(text):
+    """Detect broken embedded Tamil-font extraction that should be OCRed instead."""
+    if not text or not re.search(r'[\u0B80-\u0BFF]{2,}', text):
+        return False
+
+    tamil_chars = len(re.findall(r'[\u0B80-\u0BFF]', text))
+    if tamil_chars < 50:
+        return False
+
+    replacement_chars = text.count('\ufffd')
+    private_symbols = len(re.findall(r'[\ue000-\uf8ff]', text))
+    orphan_marks = len(re.findall(r'(^|[\s\n])[\u0BBE-\u0BCD\u0BD7]', text))
+    latin_tamil_glue = len(re.findall(r'[A-Za-z][\u0B80-\u0BFF]|[\u0B80-\u0BFF][A-Za-z]', text))
+    suspicious_sequences = len(re.findall(r'(?:நர|ைை|ஆஆ|ொதொ|்நந|வவ|ைனித|வபரு)', text))
+    bad_score = replacement_chars * 3 + private_symbols + orphan_marks + latin_tamil_glue + suspicious_sequences * 2
+
+    return bad_score / max(tamil_chars, 1) > 0.015
 
 # ── Text extraction ───────────────────────────────────────────────────────────
 
-def extract_text(filepath):
+def extract_text(filepath, ocr_backend=None):
     """
     Multi-strategy Tamil text extraction.
     1. pdfminer page-by-page  — standard Unicode Tamil PDFs (~1s/page)
@@ -425,9 +767,17 @@ def extract_text(filepath):
         return ''
 
     fname = os.path.basename(filepath)
+    ocr_backend = (ocr_backend or os.environ.get('TAMIL_ANALYZER_OCR_BACKEND', 'tesseract')).lower()
     has_any_text   = False
     is_cid_encoded = False   # True = Tamil DTP font, needs OCR
     _tamil_found   = False   # True = actual Tamil Unicode chars found
+
+    def _stage(stage, detail):
+        try:
+            from . import folder_watcher as _fwmod
+            _fwmod.update_file_stage(fname, stage, detail)
+        except Exception:
+            pass
 
     # Strategy 1: pdfminer page-by-page
     try:
@@ -452,9 +802,15 @@ def extract_text(filepath):
 
         text = '\n'.join(parts)
         if re.search(r'[\u0B80-\u0BFF]{2,}', text):
-            _tamil_found = True
-            _stage('done', 'text extracted (pdfminer)')
-            return _normalize_tamil_text(text)   # Unicode Tamil found — done
+            if not _looks_like_poor_tamil_extraction(text):
+                _tamil_found = True
+                _stage('done', 'text extracted (pdfminer)')
+                return _normalize_tamil_text(text)   # Unicode Tamil found — done
+            has_any_text = True
+            is_cid_encoded = True
+            logging.getLogger('app').info(
+                f'{fname}: embedded Tamil text looks malformed — routing to OCR'
+            )
 
         # Detect CID-encoded fonts: (cid:N) tokens dominate output.
         # This is the signature of Shree-Lipi / e-Kalappai / ELCOT fonts
@@ -503,9 +859,15 @@ def extract_text(filepath):
 
             text2 = '\n'.join(parts2)
             if re.search(r'[\u0B80-\u0BFF]{2,}', text2):
-                _tamil_found = True
-                _stage('done', 'text extracted (pdfplumber)')
-                return _normalize_tamil_text(text2)
+                if not _looks_like_poor_tamil_extraction(text2):
+                    _tamil_found = True
+                    _stage('done', 'text extracted (pdfplumber)')
+                    return _normalize_tamil_text(text2)
+                has_any_text = True
+                is_cid_encoded = True
+                logging.getLogger('app').info(
+                    f'{fname}: pdfplumber Tamil text looks malformed — routing to OCR'
+                )
 
             cid2     = len(re.findall(r'\(cid:\d+\)', text2))
             non_cid2 = len(re.sub(r'\(cid:\d+\)', '', text2).split())
@@ -527,6 +889,61 @@ def extract_text(filepath):
     # Some textbook PDFs contain only tiny English selectable text such as
     # watermarks/page labels plus full-page Tamil images. In that case
     # has_any_text is True, but Tamil text is still absent, so OCR must run.
+    if ocr_backend in {'paddle', 'paddleocr', 'auto'}:
+        try:
+            from . import ocr_paddle_backend as _paddle_backend
+
+            reason = 'CID font encoding' if is_cid_encoded else 'no usable Tamil Unicode text; trying OCR fallback'
+            _stage('ocr', f'PaddleOCR Tamil starting ({reason})')
+
+            def _paddle_progress(stage, detail):
+                _stage(stage, detail)
+
+            result = _paddle_backend.ocr_pdf_tamil(filepath, progress=_paddle_progress)
+            paddle_text = _fix_common_tamil_ocr_errors(result.get('text') or '')
+            if re.search(r'[\u0B80-\u0BFF]{2,}', paddle_text):
+                n = len(re.findall(r'[\u0B80-\u0BFF]{2,}', paddle_text))
+                logging.getLogger('app').info(
+                    f'{fname}: PaddleOCR Tamil complete — {n} Tamil words found'
+                )
+                _stage('done', f'PaddleOCR complete — {n} Tamil words found')
+                return _normalize_tamil_text(paddle_text)
+            logging.getLogger('app').warning(
+                f'{fname}: PaddleOCR Tamil did not produce usable Tamil text: '
+                f'{result.get("error") or "unknown OCR issue"}'
+            )
+        except Exception as e:
+            logging.getLogger('app').warning(f'{fname}: PaddleOCR Tamil failed — {e}')
+
+    if ocr_backend in {'paddle', 'paddleocr'}:
+        return ''
+
+    if os.environ.get('TAMIL_ANALYZER_USE_OCR_TAMIL_BACKEND', '1') != '0':
+        try:
+            from . import ocr_tamil_backend as _ocr_backend
+
+            reason = 'CID font encoding' if is_cid_encoded else 'no usable Tamil Unicode text; trying OCR fallback'
+            _stage('ocr', f'OCR-Tamil backend starting ({reason})')
+
+            def _ocr_progress(stage, detail):
+                _stage(stage, detail)
+
+            result = _ocr_backend.ocr_pdf_tamil(filepath, progress=_ocr_progress)
+            backend_text = _fix_common_tamil_ocr_errors(result.get('text') or '')
+            if re.search(r'[\u0B80-\u0BFF]{2,}', backend_text):
+                n = len(re.findall(r'[\u0B80-\u0BFF]{2,}', backend_text))
+                logging.getLogger('app').info(
+                    f'{fname}: OCR-Tamil backend complete — {n} Tamil words found'
+                )
+                _stage('done', f'OCR complete — {n} Tamil words found')
+                return _normalize_tamil_text(backend_text)
+            logging.getLogger('app').warning(
+                f'{fname}: OCR-Tamil backend did not produce usable Tamil text: '
+                f'{result.get("error") or "unknown OCR issue"}'
+            )
+        except Exception as e:
+            logging.getLogger('app').warning(f'{fname}: OCR-Tamil backend failed — {e}')
+
     if True:
         try:
             import gc
@@ -707,6 +1124,25 @@ def tokenize_tamil(text):
             if len(part) >= 2 and re.search(r'[\u0B80-\u0BFF]', part):
                 result.append(part)
     return result
+
+def _tamil_words_only_text(text, words_per_line=1):
+    """Return Tamil word tokens for importer text files.
+
+    Keep digits only when they are part of a Tamil token, such as 10ஆம்.
+    Standalone real numbers, marks, years, and question numbers are ignored.
+    """
+    words = re.findall(r'[0-9\u0BE6-\u0BEF\u0B80-\u0BFF]+', _fix_common_tamil_ocr_errors(text or ''))
+    cleaned = []
+    for word in words:
+        word = _normalize_word(word).strip()
+        tamil_part = re.sub(r'[0-9\u0BE6-\u0BEF]', '', word)
+        if len(tamil_part) >= 2 and re.search(r'[\u0B80-\u0BFF]', tamil_part):
+            cleaned.append(word)
+
+    lines = []
+    for i in range(0, len(cleaned), words_per_line):
+        lines.append(' '.join(cleaned[i:i + words_per_line]))
+    return '\n'.join(lines)
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
@@ -1070,7 +1506,8 @@ def extract_for_review():
         'pending_id': pending_id, 'book_name': filename,
         'total_words': total_words, 'unique_words': unique_raw,
         'unique_stems': len(unique_stems),
-        'flagged_count': len(flagged_list), 'flagged': flagged_list
+        'flagged_count': len(flagged_list), 'flagged': flagged_list,
+        'raw_text': text[:500000]
     })
 
 
@@ -1112,6 +1549,8 @@ def analyze():
     data = request.json
     pending_id = data.get('pending_id')
     confirmed_proper = set(data.get('proper_noun_stems', []))
+    grade_min = data.get('grade_min', 1)
+    grade_max = data.get('grade_max', 12)
 
     conn = get_db()
     row = conn.execute('SELECT * FROM pending_extractions WHERE id = ?', (pending_id,)).fetchone()
@@ -1210,6 +1649,20 @@ def analyze():
 
         cumulative_prev = set(cumulative)  # snapshot before next grade adds words
 
+    # Calculate for grade range
+    cumulative_up_to_max = set()
+    for g in range(1, grade_max + 1):
+        if g in grade_vocab:
+            cumulative_up_to_max |= grade_vocab[g]
+    range_known = all_stems & cumulative_up_to_max
+    cumulative_up_to_min_minus_1 = set()
+    for g in range(1, grade_min):
+        if g in grade_vocab:
+            cumulative_up_to_min_minus_1 |= grade_vocab[g]
+    range_new = range_known - cumulative_up_to_min_minus_1
+    pct_suitable = round(len(range_known) / effective_total * 100, 1) if effective_total else 0
+    pct_new_in_range = round(len(range_new) / effective_total * 100, 1) if effective_total else 0
+
     first_readable = next((r for r in results if r['comprehension_pct'] >= 80), None)
     best_grade = first_readable['grade'] if first_readable else None
 
@@ -1244,6 +1697,15 @@ def analyze():
 
     # Target book sentence stats
     tss = sentence_stats(target_sent_counts)
+
+    # Per-paragraph suitability
+    paragraphs = [p.strip() for p in raw_text.split('\n\n') if p.strip()]
+    paragraph_data = []
+    for para in paragraphs[:50]:  # limit to 50 paragraphs
+        para_stems = set(tokenize_tamil(para))
+        para_known = para_stems & range_known
+        para_pct = round(len(para_known) / len(para_stems) * 100, 1) if para_stems else 0
+        paragraph_data.append({'text': para[:200] + '...' if len(para) > 200 else para, 'suitable_pct': para_pct})
 
     # Run extended analytics (all free, local computation)
     try:
@@ -1345,6 +1807,11 @@ def analyze():
         'unique_words': unique_words,
         'unique_stems': unique_stems_cnt,
         'proper_nouns_excluded': len(confirmed_proper),
+        'grade_min': grade_min,
+        'grade_max': grade_max,
+        'grade_range_suitable_pct': pct_suitable,
+        'grade_range_new_pct': pct_new_in_range,
+        'paragraphs': paragraph_data,
         'proper_noun_list': proper_noun_list,
         'stems_analyzed': effective_total,
         'best_grade': best_grade,
@@ -1516,6 +1983,13 @@ def importer_download_status(job_id):
         return jsonify({"error": "Job not found"}), 404
     return jsonify(job)
 
+@app.route("/api/importer/job_status/<job_id>")
+def importer_job_status(job_id):
+    job = _get_import_job(job_id)
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
+    return jsonify(job)
+
 @app.route('/api/importer/download', methods=['POST'])
 def importer_download():
     data = request.json or {}
@@ -1548,6 +2022,287 @@ def importer_download():
         else:
             result['meaning_rebuilt'] = False
         return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/importer/compress_pdfs', methods=['POST'])
+def importer_compress_pdfs():
+    """Compress all PDFs in textbooks_imported/ to textbooks_imported_compressed/"""
+    import subprocess
+    try:
+        input_dir = 'textbooks_imported'
+        output_dir = 'textbooks_imported_compressed'
+        if not os.path.exists(input_dir):
+            return jsonify({'error': f'Input directory {input_dir} does not exist'}), 400
+        
+        # Run the compression script
+        result = subprocess.run(['./compress_pdfs.sh', input_dir, output_dir], 
+                              capture_output=True, text=True, cwd=REPO_ROOT)
+        
+        if result.returncode != 0:
+            return jsonify({'error': f'Compression failed: {result.stderr}'}), 500
+        
+        return jsonify({'ok': True, 'message': 'PDF compression completed successfully'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/importer/extract_text', methods=['POST'])
+def importer_extract_text():
+    """Extract text from all PDFs in textbooks_imported/ or textbooks_imported_compressed/ to textbooks_imported_text/"""
+    data = request.json or {}
+    source_type = data.get('source', 'original')  # 'original' or 'compressed'
+    ocr_backend = (data.get('ocr_backend') or 'auto').lower()
+    if ocr_backend == 'paddleocr':
+        ocr_backend = 'paddle'
+    if ocr_backend not in {'auto', 'tesseract', 'paddle'}:
+        return jsonify({'error': 'Invalid OCR backend'}), 400
+    
+    import concurrent.futures
+    try:
+        if source_type == 'compressed':
+            input_dir = 'textbooks_imported_compressed'
+        else:
+            input_dir = 'textbooks_imported'
+            
+        output_dir = 'textbooks_imported_text'
+        os.makedirs(output_dir, exist_ok=True)
+        
+        if not os.path.exists(input_dir):
+            return jsonify({'error': f'Input directory {input_dir} does not exist'}), 400
+        
+        # Find all PDFs
+        pdf_files = []
+        for root, dirs, files in os.walk(input_dir):
+            for file in files:
+                if file.lower().endswith('.pdf'):
+                    pdf_files.append(os.path.join(root, file))
+        
+        if not pdf_files:
+            return jsonify({'error': f'No PDF files found in {input_dir}/'}), 400
+        
+        processed = 0
+        errors = 0
+        
+        def process_pdf(pdf_path):
+            nonlocal processed, errors
+            try:
+                rel_path = os.path.relpath(pdf_path, input_dir)
+                txt_path = os.path.join(output_dir, os.path.splitext(rel_path)[0] + '.txt')
+                os.makedirs(os.path.dirname(txt_path), exist_ok=True)
+                
+                text = _tamil_words_only_text(extract_text(pdf_path, ocr_backend=ocr_backend))
+                if text.strip():
+                    with open(txt_path, 'w', encoding='utf-8') as f:
+                        f.write(text)
+                    processed += 1
+                    return f'✓ {rel_path}'
+                else:
+                    errors += 1
+                    return f'⚠ {rel_path} - no text extracted'
+            except Exception as e:
+                errors += 1
+                return f'✗ {os.path.basename(pdf_path)} - {str(e)}'
+        
+        # Process PDFs with thread pool
+        results = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+            futures = [executor.submit(process_pdf, pdf) for pdf in pdf_files]
+            for future in concurrent.futures.as_completed(futures):
+                results.append(future.result())
+        
+        return jsonify({
+            'ok': True, 
+            'message': f'Text extraction from {source_type} PDFs completed: {processed} processed, {errors} errors',
+            'results': results
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+def _run_extract_text_job(job_id, source_type, ocr_backend='auto'):
+    import concurrent.futures
+    try:
+        if source_type == 'compressed':
+            input_dir = 'textbooks_imported_compressed'
+        else:
+            input_dir = 'textbooks_imported'
+
+        output_dir = 'textbooks_imported_text'
+        os.makedirs(output_dir, exist_ok=True)
+
+        if not os.path.exists(input_dir):
+            _set_import_job(job_id, status="error", phase="error", error=f"Input directory {input_dir} does not exist")
+            return
+
+        pdf_files = []
+        for root, dirs, files in os.walk(input_dir):
+            for file in files:
+                if file.lower().endswith('.pdf'):
+                    pdf_files.append(os.path.join(root, file))
+        pdf_files.sort()
+
+        total = len(pdf_files)
+        if not total:
+            _set_import_job(job_id, status="error", phase="error", error=f"No PDF files found in {input_dir}/")
+            return
+
+        state_lock = threading.Lock()
+        processed = 0
+        errors = 0
+        active = {}
+        results = []
+
+        _set_import_job(
+            job_id,
+            status="running",
+            phase="extract",
+            source=source_type,
+            ocr_backend=ocr_backend,
+            total=total,
+            processed=0,
+            errors=0,
+            active=[],
+            results=[],
+            message=f"Starting text extraction from {source_type} PDFs using {ocr_backend} OCR"
+        )
+
+        def snapshot(message=None):
+            _set_import_job(
+                job_id,
+                processed=processed,
+                errors=errors,
+                active=sorted(active.values(), key=lambda item: item["index"]),
+                recent=results[-10:],
+                message=message or f"Extracted {processed}/{total} PDFs"
+            )
+
+        def process_pdf(index, pdf_path):
+            nonlocal processed, errors
+            rel_path = os.path.relpath(pdf_path, input_dir)
+            with state_lock:
+                active[pdf_path] = {"index": index, "file": rel_path}
+                snapshot(f"Extracting {index}/{total}: {rel_path}")
+
+            try:
+                txt_path = os.path.join(output_dir, os.path.splitext(rel_path)[0] + '.txt')
+                os.makedirs(os.path.dirname(txt_path), exist_ok=True)
+
+                text = _tamil_words_only_text(extract_text(pdf_path, ocr_backend=ocr_backend))
+                if text.strip():
+                    with open(txt_path, 'w', encoding='utf-8') as f:
+                        f.write(text)
+                    item = {"ok": True, "file": rel_path, "message": f"Extracted {rel_path}"}
+                else:
+                    item = {"ok": False, "file": rel_path, "error": "No text extracted"}
+            except Exception as e:
+                item = {"ok": False, "file": rel_path, "error": str(e)}
+
+            with state_lock:
+                processed += 1
+                if not item["ok"]:
+                    errors += 1
+                active.pop(pdf_path, None)
+                results.append(item)
+                snapshot(f"Completed {processed}/{total}: {rel_path}")
+            return item
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+            futures = [executor.submit(process_pdf, index, pdf) for index, pdf in enumerate(pdf_files, start=1)]
+            for future in concurrent.futures.as_completed(futures):
+                future.result()
+
+        _set_import_job(
+            job_id,
+            status="done",
+            phase="done",
+            processed=processed,
+            errors=errors,
+            active=[],
+            results=results,
+            message=f"Text extraction from {source_type} PDFs completed: {processed - errors} processed, {errors} errors",
+            result={"ok": True, "processed": processed - errors, "errors": errors, "results": results, "ocr_backend": ocr_backend}
+        )
+    except Exception as e:
+        _set_import_job(job_id, status="error", phase="error", message=str(e), error=str(e))
+
+@app.route('/api/importer/extract_text_async', methods=['POST'])
+def importer_extract_text_async():
+    data = request.json or {}
+    source_type = data.get('source', 'original')
+    if source_type not in {'original', 'compressed'}:
+        return jsonify({'error': 'Invalid source'}), 400
+    ocr_backend = (data.get('ocr_backend') or 'auto').lower()
+    if ocr_backend == 'paddleocr':
+        ocr_backend = 'paddle'
+    if ocr_backend not in {'auto', 'tesseract', 'paddle'}:
+        return jsonify({'error': 'Invalid OCR backend'}), 400
+
+    job_id = uuid.uuid4().hex[:12]
+    _set_import_job(job_id, id=job_id, status="queued", phase="queued", message="Queued", source=source_type, ocr_backend=ocr_backend, created_at=time.time())
+    t = threading.Thread(target=_run_extract_text_job, args=(job_id, source_type, ocr_backend), daemon=True)
+    t.start()
+    return jsonify({"ok": True, "job_id": job_id})
+
+@app.route('/api/importer/load_text', methods=['POST'])
+def importer_load_text():
+    """Load all text files from textbooks_imported_text/ into the grade database"""
+    try:
+        input_dir = 'textbooks_imported_text'
+        if not os.path.exists(input_dir):
+            return jsonify({'error': f'Input directory {input_dir} does not exist'}), 400
+        
+        # Find all text files
+        txt_files = []
+        for root, dirs, files in os.walk(input_dir):
+            for file in files:
+                if file.lower().endswith('.txt'):
+                    txt_files.append(os.path.join(root, file))
+        
+        if not txt_files:
+            return jsonify({'error': 'No text files found in textbooks_imported_text/'}), 400
+        
+        _load_all_hashes()
+        processed = 0
+        errors = 0
+        results = []
+        
+        for txt_path in txt_files:
+            try:
+                # Infer grade from path structure (e.g., textbooks_imported_text/Samacheer_Kalvi/Class_01/Tamil/Term_1/file.txt)
+                rel_path = os.path.relpath(txt_path, input_dir)
+                grade = None
+                
+                # Try to extract grade from path
+                path_parts = rel_path.split(os.sep)
+                for part in path_parts:
+                    if part.lower().startswith('class_') or part.lower().startswith('grade_'):
+                        try:
+                            grade = int(part.split('_')[1])
+                            break
+                        except (ValueError, IndexError):
+                            continue
+                
+                if grade is None:
+                    # Default to grade 1 if can't infer
+                    grade = 1
+                
+                # Process the text file
+                result = _process_grade_file(txt_path, grade, 'text_import')
+                if result.get('error'):
+                    errors += 1
+                    results.append(f'✗ {rel_path} - {result["error"]}')
+                else:
+                    processed += 1
+                    results.append(f'✓ {rel_path} - {result.get("word_count", 0)} words')
+                    
+            except Exception as e:
+                errors += 1
+                results.append(f'✗ {os.path.basename(txt_path)} - {str(e)}')
+        
+        return jsonify({
+            'ok': True,
+            'message': f'Text loading completed: {processed} processed, {errors} errors',
+            'results': results
+        })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -1787,55 +2542,117 @@ READING_PASSAGES = {
     1: [
         'அம்மா வீட்டில் இருக்கிறார். நான் புத்தகம் படிக்கிறேன். மரம் அருகில் பறவை உள்ளது.',
         'பூனை பால் குடிக்கிறது. குழந்தை படம் பார்க்கிறது. அப்பா கதை சொல்கிறார்.',
+        'நான் பள்ளிக்கு செல்கிறேன். என் நண்பர்கள் என்னை எதிர்பார்க்கிறார்கள். நாங்கள் விளையாடுவோம்.',
+        'சூரியன் பிரகாசமாக ஒளிர்கிறது. மேகங்கள் வெள்ளையாக இருக்கின்றன. காற்று மென்மையாக வீசுகிறது.',
+        'என் வீட்டில் நாய் ஒன்று இருக்கிறது. அதன் பெயர் ராம். அது என்னை மிகவும் விரும்புகிறது.',
     ],
     2: [
         'குழந்தைகள் பள்ளிக்கு சென்றனர். ஆசிரியர் நல்ல கதையைப் படித்தார். அனைவரும் கவனமாக கேட்டனர்.',
         'மழை பெய்தது. மரங்கள் பசுமையாக இருந்தன. மாணவர்கள் மகிழ்ச்சியுடன் பாடம் படித்தனர்.',
+        'எங்கள் வகுப்பில் பத்து மாணவர்கள் இருக்கிறார்கள். அனைவரும் நண்பர்கள். நாங்கள் ஒருவருக்கொருவர் உதவுகிறோம்.',
+        'பறவைகள் காலையில் பாடுகின்றன. அவை மரங்களில் அமர்ந்திருக்கின்றன. அவற்றின் இனிமையான குரல் கேட்கிறது.',
+        'நான் பழம் சாப்பிடுகிறேன். அது ருசியாக இருக்கிறது. என் அம்மா அதை வாங்கிக் கொடுத்தார்.',
     ],
     3: [
         'எங்கள் ஊரில் அழகான பூங்கா உள்ளது. அங்கு குழந்தைகள் மாலை நேரத்தில் விளையாடுகிறார்கள். மரங்களும் மலர்களும் அந்த இடத்தை அழகாக்குகின்றன.',
         'காலை நேரத்தில் சூரியன் உதிக்கிறது. பறவைகள் இனிமையாக பாடுகின்றன. மாணவர்கள் பள்ளிக்குச் செல்லத் தயாராகிறார்கள்.',
+        'நான் என் சகோதரியுடன் விளையாடுகிறேன். அவள் என்னை விரும்புகிறாள். நாங்கள் ஒருவருக்கொருவர் உதவுகிறோம்.',
+        'மரங்கள் நமக்கு ஆக்ஸிஜனை தருகின்றன. அவை நமது சுற்றுச்சூழலை பாதுகாக்கின்றன. ஆகவே மரங்களை வெட்டாமல் பாதுகாக்க வேண்டும்.',
+        'பள்ளியில் நாங்கள் பாடம் கற்கிறோம். ஆசிரியர் எங்களுக்கு சொல்லிக் கொடுக்கிறார். நாங்கள் கவனமாகக் கேட்கிறோம்.',
     ],
     4: [
         'நீர் நம் வாழ்விற்கு மிகவும் அவசியமானது. நாம் குடிக்கவும் சமைக்கவும் விவசாயம் செய்யவும் நீரைப் பயன்படுத்துகிறோம். ஆகவே நீரை வீணாக்காமல் பாதுகாக்க வேண்டும்.',
         'நூலகம் அறிவை வளர்க்கும் சிறந்த இடம். அங்கு பல வகையான புத்தகங்கள் உள்ளன. நல்ல புத்தகங்களைப் படிப்பதால் சிந்தனை திறன் வளரும்.',
+        'விவசாயம் நம் நாட்டின் முதுகெலும்பு. விவசாயிகள் உழைத்து உணவை உற்பத்தி செய்கிறார்கள். நாம் அவர்களை மதிக்க வேண்டும்.',
+        'கடல் நமக்கு பல பொருட்களை தருகிறது. மீன், உப்பு போன்றவை கடலில் இருந்து வருகின்றன. ஆகவே கடலை தூய்மையாக வைத்திருக்க வேண்டும்.',
+        'பறவைகள் இயற்கையின் அழகு. அவை வெவ்வேறு வண்ணங்களில் இருக்கின்றன. அவற்றைப் பாதுகாப்பது நமது கடமை.',
     ],
     5: [
         'சுற்றுச்சூழலைப் பாதுகாப்பது ஒவ்வொருவரின் கடமை. மரங்களை நடுதல், நீரைச் சேமித்தல், குப்பையை சரியான இடத்தில் போடுதல் போன்ற பழக்கங்கள் நம் ஊரை தூய்மையாக வைத்திருக்கும்.',
+        'ஆரோக்கியமான உணவு சாப்பிடுவது மிகவும் முக்கியம். பழம், காய்கறிகள், தானியங்கள் நமக்கு ஆரோக்கியத்தை தருகின்றன. சரியான உணவு நம்மை வலிமையாக்கும்.',
+        'நண்பர்களுடன் இருப்பது மகிழ்ச்சியை தருகிறது. நாம் ஒருவருக்கொருவர் உதவ வேண்டும். நல்ல நண்பர்கள் வாழ்க்கையை அழகாக்குகிறார்கள்.',
+        'புத்தகங்கள் நமக்கு அறிவை தருகின்றன. அவற்றைப் படிப்பதால் புதிய விஷயங்களை கற்கலாம். நூலகம் சென்று புத்தகங்கள் படியுங்கள்.',
+        'விளையாட்டு நமது உடலை ஆரோக்கியமாக வைத்திருக்கிறது. அது மனதை மகிழ்ச்சியாக்குகிறது. தினமும் விளையாட்டு செய்யுங்கள்.',
     ],
     6: [
         'தமிழ் மொழி பழமையான செம்மொழிகளில் ஒன்றாகும். அதன் இலக்கியங்கள் மனித வாழ்க்கை, இயற்கை, அறம், அறிவு ஆகியவற்றைப் பற்றி அழகாக எடுத்துரைக்கின்றன.',
+        'தமிழ் நாடு தென்னிந்தியாவில் அமைந்துள்ளது. அதன் தலைநகரம் சென்னை. தமிழ் மக்கள் தங்கள் மொழியை மிகவும் விரும்புகிறார்கள்.',
+        'வள்ளுவர் தமிழ் இலக்கியத்தின் மிகப் பெரிய கவிஞர். அவர் திருக்குறளை எழுதினார். அதில் அறம், பொருள், இன்பம் பற்றி சொல்லப்பட்டுள்ளது.',
+        'தமிழ் சினிமா உலகம் மிகவும் பிரபலமானது. அதில் நல்ல கதைகள், நடனம், இசை இருக்கின்றன. மக்கள் அதை ரசிக்கிறார்கள்.',
+        'தமிழ் பண்டிகைகள் மிகவும் வண்ணமயமானவை. பொங்கல், தீபாவளி போன்றவை மகிழ்ச்சியை தருகின்றன. அவற்றை கொண்டாடுவது மரபு.',
     ],
     7: [
         'அறிவியல் சிந்தனை மனிதனுக்கு காரணத்தை ஆராயும் திறனை அளிக்கிறது. ஒரு நிகழ்வு ஏன் நடக்கிறது என்பதை கேள்வி கேட்டு ஆராயும்போது புதிய கண்டுபிடிப்புகள் உருவாகின்றன.',
+        'பூமி சூரியனை சுற்றி வருகிறது. இது ஒரு ஆண்டு ஆகிறது. இந்த சுற்று நமக்கு பருவங்களை தருகிறது.',
+        'மின்சாரம் நமது வாழ்க்கையை எளிதாக்குகிறது. அது விளக்கு, விசிறி போன்றவற்றை இயக்குகிறது. ஆனால் அதை சரியாக பயன்படுத்த வேண்டும்.',
+        'நீர் மூன்று நிலைகளில் இருக்கிறது. திடம், திரவம், வாயு. வெப்பம் அதை மாற்றுகிறது.',
+        'தாவரங்கள் சூரிய ஒளியை உணவாக மாற்றுகின்றன. இது புகைப்பட செயல் என்று அழைக்கப்படுகிறது. இது பூமியில் உயிர் வாழ்வுக்கு அவசியம்.',
     ],
     8: [
         'சமூகத்தில் ஒற்றுமை நிலைக்க வேண்டுமெனில் அனைவரும் ஒருவரை ஒருவர் மதிக்க வேண்டும். மொழி, மதம், பழக்கம் ஆகிய வேறுபாடுகள் இருந்தாலும் மனித நேயம் பொதுவான மதிப்பாக இருக்க வேண்டும்.',
+        'கல்வி ஒரு மனிதனை வளர்ச்சியடையச் செய்கிறது. அது அறிவை தருகிறது. கல்வியால் நல்ல வேலை கிடைக்கிறது.',
+        'ஒழுக்கம் மனித வாழ்க்கையின் அடிப்படை. நேர்மை, உண்மை போன்றவை ஒழுக்கத்தின் பகுதிகள். ஒழுக்கமான மனிதன் அனைவராலும் மதிக்கப்படுகிறான்.',
+        'சமூக சேவை மிகவும் முக்கியம். ஏழைகளுக்கு உதவுதல், சுற்றுச்சூழலை சுத்தம் செய்தல் போன்றவை சமூக சேவை. இது மனதுக்கு திருப்தியை தருகிறது.',
+        'நாட்டு மக்கள் ஒற்றுமையாக இருக்க வேண்டும். அப்போதுதான் வளர்ச்சி ஏற்படும். பிரிவினை நாட்டை பலவீனப்படுத்தும்.',
     ],
     9: [
         'வரலாற்றைப் படிப்பது கடந்த கால நிகழ்வுகளை அறிதலுக்கு மட்டுமல்ல; தற்போதைய சமூக மாற்றங்களைப் புரிந்துகொள்வதற்கும் உதவுகிறது. மக்கள் எடுத்த முடிவுகள் எதிர்காலத்தை எவ்வாறு பாதித்தன என்பதையும் அது காட்டுகிறது.',
+        'தமிழக வரலாறு மிகவும் பழமையானது. சோழர், பாண்டியர், செரர் ஆட்சி செய்தனர். அவர்கள் கல்வி, கலை, வணிகத்தில் மேம்பட்டிருந்தனர்.',
+        'சுதந்திர போர் இந்தியாவின் வரலாற்றில் முக்கியமானது. மகாத்மா காந்தி அதை வழிநடத்தினார். அது அகிம்சை முறையில் நடந்தது.',
+        'தொழில்நுட்பம் வாழ்க்கையை மாற்றியுள்ளது. கணினி, இணையம் புதிய வாய்ப்புகளை தந்துள்ளன. ஆனால் அதை தவறாக பயன்படுத்தக்கூடாது.',
+        'சமூக மாற்றம் தேவை. பழைய மரபுகளை கைவிட்டு புதியவற்றை ஏற்றுக்கொள்ள வேண்டும். இது வளர்ச்சிக்கு உதவும்.',
     ],
     10: [
         'தொழில்நுட்ப வளர்ச்சி கல்வி முறையில் பல மாற்றங்களை ஏற்படுத்தியுள்ளது. இணையம் மூலம் மாணவர்கள் பல்வேறு அறிவு வளங்களை அணுக முடிகிறது. ஆனால் தகவலை சிந்தித்து தேர்ந்தெடுக்கும் திறனும் அவசியம்.',
+        'இணையம் உலகை இணைக்கிறது. அதன் மூலம் தகவல் பரிமாற்றம் எளிதாகிறது. ஆனால் தவறான தகவல்களை தவிர்க்க வேண்டும்.',
+        'கணினி நமது வேலையை எளிதாக்குகிறது. அதில் பல மென்பொருட்கள் இருக்கின்றன. அவற்றை கற்றுக்கொள்ள வேண்டும்.',
+        'அறிவியல் கண்டுபிடிப்புகள் வாழ்க்கையை மேம்படுத்துகின்றன. மருத்துவம், விண்வெளி ஆய்வு போன்றவை அதன் எடுத்துக்காட்டுகள்.',
+        'சமூக ஊடகங்கள் தகவலை விரைவாக பரப்புகின்றன. ஆனால் அதை நேர்மையாக பயன்படுத்த வேண்டும்.',
     ],
     11: [
         'இலக்கியப் படைப்புகள் சமூகத்தின் உணர்வுகளையும் முரண்பாடுகளையும் வெளிப்படுத்தும் ஆற்றல் கொண்டவை. ஒரு சிறந்த படைப்பு வாசகரை சிந்திக்கவும் தன் அனுபவத்தை மறுபரிசீலனை செய்யவும் தூண்டும்.',
+        'தமிழ் இலக்கியம் பல்வேறு வகைகளில் இருக்கிறது. கவிதை, கதை, நாவல் போன்றவை. அவை மனதை கவர்கின்றன.',
+        'புத்தகங்கள் வாசிப்பு மனதை வளர்க்கிறது. அது புதிய எண்ணங்களை தருகிறது. நல்ல புத்தகங்களை தேர்ந்தெடுக்க வேண்டும்.',
+        'எழுத்தாளர்கள் சமூகத்தை பிரதிபலிக்கிறார்கள். அவர்கள் கதைகளில் உண்மையை சொல்கிறார்கள். அது மாற்றத்தை தூண்டும்.',
+        'கலை வாழ்க்கையை அழகாக்குகிறது. இசை, நடனம், ஓவியம் போன்றவை கலை வடிவங்கள். அவற்றை வளர்க்க வேண்டும்.',
     ],
     12: [
         'மனித முன்னேற்றம் அறிவு, பொறுப்பு, கருணை ஆகிய மூன்றின் சமநிலையால் நிலைபெறும். அறிவியல் புதிய வாய்ப்புகளைத் திறந்தாலும், அவற்றை அறநெறியுடன் பயன்படுத்தும் சமூகப் பொறுப்பு அவசியமானது.',
+        'உலகளாவிய பிரச்சனைகளை தீர்க்க வேண்டும். சூழல் மாசு, ஏழ்மை போன்றவை. ஒத்துழைப்பு தேவை.',
+        'அறநெறி வாழ்க்கையின் அடிப்படை. நேர்மை, நியாயம் போன்றவை அறநெறி. அதை கடைபிடிக்க வேண்டும்.',
+        'தலைமை திறன் முக்கியம். ஒரு தலைவன் மக்களை வழிநடத்த வேண்டும். அது பொறுப்பு.',
+        'எதிர்காலம் நமது செயல்களால் உருவாகிறது. நல்ல செயல்கள் நல்ல எதிர்காலத்தை தரும்.',
     ],
 }
 
-def _reading_passage_for_grade(grade):
+def _reading_passage_for_grade(grade, source='default'):
     grade = max(1, min(12, int(grade or 1)))
-    items = READING_PASSAGES.get(grade) or READING_PASSAGES[12]
-    return items[int(time.time()) % len(items)]
+    if source == 'default':
+        items = READING_PASSAGES.get(grade) or READING_PASSAGES[12]
+        if len(items) <= 1:
+            return items[0]
+        return random.choice(items)
+    else:
+        # Query database for passages from textbooks or children books
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT text FROM reading_passages WHERE grade = ? AND source = ? ORDER BY RANDOM() LIMIT 1", (grade, source))
+        row = cursor.fetchone()
+        conn.close()
+        if row:
+            return row[0]
+        # Fallback to default if no passages found
+        items = READING_PASSAGES.get(grade) or READING_PASSAGES[12]
+        if len(items) <= 1:
+            return items[0]
+        return random.choice(items)
 
 @app.route('/api/reading/passage')
 def reading_passage():
     grade = int(request.args.get('grade') or 1)
-    text = _reading_passage_for_grade(grade)
-    return jsonify({'grade': grade, 'text': text, 'word_count': len(_reading_score.tamil_words(text))})
+    source = request.args.get('source') or 'default'
+    text = _reading_passage_for_grade(grade, source)
+    return jsonify({'grade': grade, 'source': source, 'text': text, 'word_count': len(_reading_score.tamil_words(text))})
 
 @app.route('/api/reading/asr_status')
 def reading_asr_status():
@@ -3386,7 +4203,7 @@ def generate_card(analysis_id):
 
 
 # ── Load simplifier module ────────────────────────────────────────────────────
-import simplifier as _simplifier
+from . import simplifier as _simplifier
 
 def _build_simplifier_engine():
     """Build a SimplifierEngine from the current grade DB."""
@@ -3632,7 +4449,7 @@ def simplify_export():
 
 
 # ── Word Library ──────────────────────────────────────────────────────────────
-import word_library as _wlib
+from . import word_library as _wlib
 
 _WLIB_BUILD_STATUS = {'running': False, 'progress': 0, 'message': '', 'last': None}
 _WLIB_STATUS_LOCK  = threading.Lock()

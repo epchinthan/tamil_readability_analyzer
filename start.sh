@@ -61,6 +61,9 @@ if [ -f ".install_complete" ]; then
   if [ "requirements.txt" -nt ".install_complete" ]; then
     NEED_SETUP=1
   fi
+  if [ -f "requirements-paddleocr.txt" ] && [ "requirements-paddleocr.txt" -nt ".install_complete" ]; then
+    NEED_SETUP=1
+  fi
   if [ "setup.py" -nt ".install_complete" ]; then
     NEED_SETUP=1
   fi
@@ -103,6 +106,19 @@ if [ "$TAM_OK" = "1" ]; then
 else
   echo "  ⚠ Tamil OCR is not fully available. Normal text PDFs still work."
   echo "    For scanned PDFs, install Tesseract + Tamil language pack + Poppler."
+fi
+
+if .venv/bin/python - <<'PY' >/dev/null 2>&1
+import importlib.util
+mods = ["paddleocr", "paddle"]
+raise SystemExit(0 if all(importlib.util.find_spec(m) for m in mods) else 1)
+PY
+then
+  echo "  ✓ PaddleOCR Tamil backend available"
+else
+  echo "  ⚠ PaddleOCR Tamil backend is not installed yet."
+  echo "    start.sh will try to install it during setup; Tesseract OCR remains available."
+  echo "    To skip PaddleOCR installs: export TAMIL_ANALYZER_SKIP_PADDLEOCR=1"
 fi
 
 detect_whisper_cpp

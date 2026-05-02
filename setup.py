@@ -27,6 +27,7 @@ REQUIRED_PYTHON = (3, 8)
 ROOT = Path(__file__).resolve().parent
 VENV = ROOT / ".venv"
 REQ = ROOT / "requirements.txt"
+REQ_PADDLEOCR = ROOT / "requirements-paddleocr.txt"
 
 
 def run(cmd, check=False, capture=True, shell=False):
@@ -117,6 +118,30 @@ def install_python_packages():
     run([py, "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"], check=True, capture=False)
     run([py, "-m", "pip", "install", "-r", str(REQ)], check=True, capture=False)
     print("✓ Python packages installed")
+
+    install_paddleocr_packages_best_effort()
+
+
+def install_paddleocr_packages_best_effort():
+    if os.environ.get("TAMIL_ANALYZER_SKIP_PADDLEOCR") == "1":
+        print("⚠ PaddleOCR install skipped because TAMIL_ANALYZER_SKIP_PADDLEOCR=1")
+        return False
+    if not REQ_PADDLEOCR.exists():
+        return False
+
+    print("\nInstalling optional PaddleOCR Tamil backend")
+    print("This package set is large; if it fails, the app will still use Tesseract Tamil OCR.")
+    py = str(venv_python())
+    result = run([py, "-m", "pip", "install", "-r", str(REQ_PADDLEOCR)], check=False, capture=False)
+    if result.returncode == 0:
+        print("✓ Optional PaddleOCR packages installed")
+        return True
+
+    print("⚠ Optional PaddleOCR install did not complete.")
+    print("  The app will still run with Tesseract Tamil OCR.")
+    print("  To retry later: ./start.sh")
+    print("  To skip this optional install: export TAMIL_ANALYZER_SKIP_PADDLEOCR=1")
+    return False
 
 
 def apt_available() -> bool:

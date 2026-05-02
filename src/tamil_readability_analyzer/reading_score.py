@@ -17,6 +17,14 @@ WRONG_PENALTY = 0.75
 MISSED_PENALTY = 1.0
 EXTRA_PENALTY = 0.20
 
+GENTLE_NEAR_THRESHOLD = 0.45
+NORMAL_NEAR_THRESHOLD = 0.70
+STRICT_NEAR_THRESHOLD = 0.82
+GENTLE_NEAR_PENALTY = 0.18
+GENTLE_WRONG_PENALTY = 0.65
+GENTLE_MISSED_PENALTY = 0.90
+GENTLE_EXTRA_PENALTY = 0.15
+
 
 def normalize_tamil(text: str) -> str:
     text = unicodedata.normalize('NFC', text or '')
@@ -32,6 +40,18 @@ def tamil_words(text: str) -> List[str]:
 
 def _similar(a: str, b: str) -> float:
     return difflib.SequenceMatcher(None, a, b).ratio()
+
+
+def _near_match(a: str, b: str, stem_fn: Callable[[str], str], threshold: float) -> tuple[bool, float]:
+    sim = _similar(a, b)
+    stem_a = stem_fn(a)
+    stem_b = stem_fn(b)
+    sim_stem = _similar(stem_a, stem_b)
+    if stem_a == stem_b:
+        return True, max(sim, sim_stem)
+    if sim >= threshold or sim_stem >= threshold:
+        return True, max(sim, sim_stem)
+    return False, max(sim, sim_stem)
 
 
 def score_reading(
@@ -54,6 +74,11 @@ def score_reading(
     sm = difflib.SequenceMatcher(None, [stem_fn(w) for w in expected], [stem_fn(w) for w in spoken])
     words = []
     correct = near = wrong = missed = extra = 0
+    near_threshold = GENTLE_NEAR_THRESHOLD if strictness == 'gentle' else NORMAL_NEAR_THRESHOLD if strictness == 'normal' else STRICT_NEAR_THRESHOLD
+    near_penalty = GENTLE_NEAR_PENALTY if strictness == 'gentle' else NEAR_PENALTY
+    wrong_penalty = GENTLE_WRONG_PENALTY if strictness == 'gentle' else WRONG_PENALTY
+    missed_penalty = GENTLE_MISSED_PENALTY if strictness == 'gentle' else MISSED_PENALTY
+    extra_penalty = GENTLE_EXTRA_PENALTY if strictness == 'gentle' else EXTRA_PENALTY
 
     for tag, i1, i2, j1, j2 in sm.get_opcodes():
         exp_slice = expected[i1:i2]
@@ -64,11 +89,11 @@ def score_reading(
                 correct += 1
         elif tag == 'delete':
             for e in exp_slice:
-                words.append({'status': 'missed', 'expected': e, 'spoken': '', 'penalty': MISSED_PENALTY})
+                words.append({'status': 'missed', 'expected': e, 'spoken': '', 'penalty': missed_penalty})
                 missed += 1
         elif tag == 'insert':
             for s in sp_slice:
-                words.append({'status': 'extra', 'expected': '', 'spoken': s, 'penalty': EXTRA_PENALTY})
+                words.append({'status': 'extra', 'expected': '', 'spoken': s, 'penalty': extra_penalty})
                 extra += 1
         else:
             pairs = max(len(exp_slice), len(sp_slice))
@@ -76,27 +101,26 @@ def score_reading(
                 e = exp_slice[k] if k < len(exp_slice) else ''
                 s = sp_slice[k] if k < len(sp_slice) else ''
                 if not e:
-                    words.append({'status': 'extra', 'expected': '', 'spoken': s, 'penalty': EXTRA_PENALTY})
+                    words.append({'status': 'extra', 'expected': '', 'spoken': s, 'penalty': extra_penalty})
                     extra += 1
                 elif not s:
-                    words.append({'status': 'missed', 'expected': e, 'spoken': '', 'penalty': MISSED_PENALTY})
+                    words.append({'status': 'missed', 'expected': e, 'spoken': '', 'penalty': missed_penalty})
                     missed += 1
                 else:
-                    same_stem = stem_fn(e) == stem_fn(s)
-                    sim = _similar(e, s)
-                    near_threshold = 0.58 if strictness == 'gentle' else 0.70 if strictness == 'normal' else 0.82
-                    if same_stem or sim >= near_threshold:
-                        words.append({'status': 'near', 'expected': e, 'spoken': s, 'similarity': round(sim, 2), 'penalty': NEAR_PENALTY})
+                    near, sim = _near_match(e, s, stem_fn, near_threshold)
+                    if near:
+                        words.append({'status': 'near', 'expected': e, 'spoken': s, 'similarity': round(sim, 2), 'penalty': near_penalty})
                         near += 1
                     else:
-                        words.append({'status': 'wrong', 'expected': e, 'spoken': s, 'similarity': round(sim, 2), 'penalty': WRONG_PENALTY})
+                        words.append({'status': 'wrong', 'expected': e, 'spoken': s, 'similarity': round(sim, 2), 'penalty': wrong_penalty})
                         wrong += 1
 
     total_expected = max(1, len(expected))
     penalty = sum(float(w.get('penalty', 0)) for w in words)
     accuracy = max(0.0, 100.0 - (penalty / total_expected * 100.0))
     pronunciation_confidence = round((correct + near * 0.65) / total_expected * 100, 1)
-    final_mark = round(accuracy * 0.92 + pronunciation_confidence * 0.08, 1)
+    pronunciation_weight = 0.10 if strictness == 'gentle' else 0.08
+    final_mark = round(accuracy * (1 - pronunciation_weight) + pronunciation_confidence * pronunciation_weight, 1)
 
     return {
         'expected_word_count': len(expected),

@@ -27,6 +27,8 @@ IMPORT_ROOT = Path("textbooks_imported")
 PDF_EXT_RE = re.compile(r"\.pdf(?:$|[?#])", re.I)
 CLASS_RE = re.compile(r"(?:class|std|standard|grade|books?)\s*[-: ]*(1[0-2]|[1-9])|\b(1[0-2]|[1-9])(?:st|nd|rd|th)\b", re.I)
 TERM_RE = re.compile(r"(?:term|பருவம்)\s*[-: ]*([123])|term[_ -]?([123])", re.I)
+EXAM_CLASS_RE = re.compile(r"\bsslc\b|class\s*[- ]*10|\bhse\s*[- ]*i\s*year\b|class\s*[- ]*11|\bhse\s*[- ]*ii\s*year\b|class\s*[- ]*12", re.I)
+QUESTION_PAPER_MARKERS = ("question paper", "sample question", "model question", "வினாத்தாள்", "மாதிரி வினா", "sample paper")
 
 
 def _ensure_dirs() -> None:
@@ -331,6 +333,18 @@ def infer_class(
     m = CLASS_RE.search(text)
     if m:
         return int(m.group(1) or m.group(2))
+    return infer_exam_class(text, default=default)
+
+
+def infer_exam_class(*parts: str, default: Optional[int] = None) -> Optional[int]:
+    """Infer public-exam classes when the page uses SSLC/HSE names."""
+    text = " ".join([p or "" for p in parts]).lower()
+    if "sslc" in text:
+        return 10
+    if re.search(r"hse\s*[- ]*i\s*year|class\s*[- ]*11", text, re.I):
+        return 11
+    if re.search(r"hse\s*[- ]*ii\s*year|class\s*[- ]*12", text, re.I):
+        return 12
     return default
 
 
@@ -355,7 +369,7 @@ def infer_term(*parts: str) -> Optional[int]:
 
 def source_matches_class_page(link: Dict) -> bool:
     text = f"{link.get('text','')} {link.get('url','')}"
-    return bool(CLASS_RE.search(text))
+    return bool(CLASS_RE.search(text) or EXAM_CLASS_RE.search(text))
 
 
 def _same_site(a: str, b: str) -> bool:
@@ -434,6 +448,7 @@ def scan_source(source: Dict, depth: int = 1, max_pages: int = 30) -> Dict:
     start_url = source["url"]
     source_name = source.get("name") or urllib.parse.urlparse(start_url).netloc
     source_class = source.get("class")
+    source_type = source.get("source_type") or source.get("type") or "textbook"
     board = source.get("board", "")
     language = source.get("language", "Tamil") or "Tamil"
     tamil_only = source.get("tamil_only", True)
@@ -473,7 +488,9 @@ def scan_source(source: Dict, depth: int = 1, max_pages: int = 30) -> Dict:
             medium_context = " ".join([section, table_context, row_context, page_text])
 
             if is_pdf_like(href, text, column_header):
-                if tamil_only:
+                combined_link_text = " ".join([text, subject_hint, row_text, section, table_context, row_context, page_text, href])
+                is_question_source = str(source_type).lower() in {"question_paper", "exam", "sample_paper"}
+                if tamil_only and not is_question_source:
                     # Only accept links from a table whose own heading/context is Tamil Medium.
                     # This prevents English/Kannada/Urdu/Telugu/other medium tables on
                     # the same page from leaking in.
@@ -481,16 +498,28 @@ def scan_source(source: Dict, depth: int = 1, max_pages: int = 30) -> Dict:
                         continue
                 if exclude_english and is_english_subject_or_book(row_text, subject_hint, text):
                     continue
+                if is_question_source:
+                    low_combined = combined_link_text.lower()
+                    has_tamil_subject = ("tamil" in low_combined) or ("தமிழ்" in combined_link_text)
+                    has_question_marker = any(m in low_combined for m in QUESTION_PAPER_MARKERS) or ("வினாத்தாள்" in combined_link_text)
+                    # For exam pages, keep only Tamil-language question papers.
+                    if not has_tamil_subject:
+                        continue
+                    if not (has_question_marker or "question" in low_combined or "sample" in low_combined):
+                        continue
                 download_url = normalize_drive_url(href)
                 # Do not query remote or Google Drive filenames during scan.
                 # Filename checks happen during download only.
                 remote_name = ""
-                cls = infer_class(url, page_text, section, table_context, row_context, row_text, default=page_class)
-                med = infer_medium(section, table_context, row_context, row_text, text, href, default=page_medium)
+                cls = infer_class(url, page_text, section, table_context, row_context, row_text, text, href, default=page_class)
+                med = "Tamil" if is_question_source else infer_medium(section, table_context, row_context, row_text, text, href, default=page_medium)
                 term = infer_term(section, table_context, row_context, row_text, text, href) or page_term
-                subject = subject_hint or text or Path(urllib.parse.urlparse(href).path).stem or "Book"
+                subject = subject_hint or text or Path(urllib.parse.urlparse(href).path).stem or ("Question_Paper" if is_question_source else "Book")
                 pdfs.append({
                     "source": source_name,
+                    "storage_source": source.get("storage_source") or source_name,
+                    "source_type": source_type,
+                    "content_type": "question_paper" if is_question_source else "textbook",
                     "board": board,
                     "language": language,
                     "class": cls,
@@ -620,10 +649,16 @@ def _download_one_item(item: Dict) -> Dict:
     can still be processed into the DB.
     """
     grade = item.get("class") or item.get("grade")
-    source_name = item.get("source") or "Source"
+    content_type = (item.get("content_type") or item.get("source_type") or "textbook").lower()
+    source_name = item.get("storage_source") or item.get("source") or "Source"
     medium = item.get("medium") or "Tamil"
-    term = f"Term_{item.get('term')}" if item.get("term") else "No_Term"
-    subject = item.get("subject") or "book"
+    if content_type in {"question_paper", "exam", "sample_paper"}:
+        term = "Question_Papers"
+    elif content_type in {"syllabus", "curriculum"}:
+        term = "Syllabus"
+    else:
+        term = f"Term_{item.get('term')}" if item.get("term") else "No_Term"
+    subject = item.get("subject") or ("question_paper" if term == "Question_Papers" else ("syllabus" if term == "Syllabus" else "book"))
     url = item.get("download_url") or normalize_drive_url(item.get("url", ""))
     if not url:
         return {"ok": False, "status": "failed", "error": "missing url", "item": item}

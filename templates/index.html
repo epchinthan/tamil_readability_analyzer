@@ -251,8 +251,7 @@
       <div class="nav-item" onclick="showPage('importer')" id="nav-importer" data-roles="admin"><span class="nav-icon">⬇️</span> Textbook Importer</div>
       <div class="nav-item" onclick="showPage('history')" id="nav-history" data-roles="author teacher admin"><span class="nav-icon">🕓</span> History</div>
       <div class="nav-item" onclick="showPage('stem')" id="nav-stem" data-roles="admin"><span class="nav-icon">🔬</span> Stemming Demo</div>
-      <div class="nav-item" onclick="showPage('checker')" id="nav-checker" data-roles="author teacher"><span class="nav-icon">✍️</span> Word Checker</div>
-      <div class="nav-item" onclick="showPage('tamil-features')" id="nav-tamil-features" data-roles="author teacher"><span class="nav-icon">🪶</span> Tamil Features</div>
+      <div class="nav-item" onclick="showPage('checker')" id="nav-checker" data-roles="author teacher"><span class="nav-icon">✍️</span> Tamil Text Review</div>
       <div class="nav-item" onclick="showPage('reading')" id="nav-reading" data-roles="teacher"><span class="nav-icon">🎙️</span> Reading Practice</div>
       <div class="nav-item" onclick="showPage('reading-reports')" id="nav-reading-reports" data-roles="teacher admin"><span class="nav-icon">🧾</span> Reading Reports</div>
       <div class="nav-item" onclick="showPage('analytics')" id="nav-analytics" data-roles="teacher author"><span class="nav-icon">📊</span> Analytics</div>
@@ -327,10 +326,31 @@
     <!-- TEXTBOOK IMPORTER PAGE -->
     <div class="page" id="page-importer">
       <div class="page-title">Textbook Auto Importer</div>
-      <div class="page-sub">Add public textbook source pages, scan class pages for PDFs, download selected books, and process them into the existing school database.</div>
+      <div class="page-sub">Import Tamil medium textbooks from public sources and build your grade database.</div>
+
+      <!-- Step indicator -->
+      <div class="step-indicator" style="margin-bottom:2rem">
+        <div class="step active" id="step1"><span class="step-num">1</span>Add Sources</div>
+        <div class="step" id="step2"><span class="step-num">2</span>Download Books</div>
+        <div class="step" id="step3"><span class="step-num">3</span>Process Files</div>
+        <div class="step" id="step4"><span class="step-num">4</span>Load to Database</div>
+      </div>
+
+      <!-- STEP 1: Sources -->
+      <div class="card">
+        <div class="card-title">📚 Popular Tamil Medium Sources</div>
+        <p class="note">Quick start with common Tamil Nadu and national curriculum sources:</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin:1rem 0">
+          <button class="btn btn-primary" onclick="addDefaultSource('samacheer')">Samacheer Kalvi (TN)</button>
+          <button class="btn btn-primary" onclick="addDefaultSource('ncert')">NCERT Tamil</button>
+          <button class="btn btn-primary" onclick="addDefaultSource('cbse')">CBSE Tamil</button>
+          <button class="btn btn-sm" onclick="loadAllDefaultSources()">Load All Tamil Medium Books</button>
+        </div>
+        <p class="note">These buttons will add the sources and automatically scan for Tamil medium textbooks from classes 1-12.</p>
+      </div>
 
       <div class="card">
-        <div class="card-title">Add / Scan Source</div>
+        <div class="card-title">➕ Add Custom Source</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
           <div><label>Source name</label><input id="impName" placeholder="Samacheer Kalvi / NCERT / CBSE" value="Samacheer Kalvi"></div>
           <div><label>Board</label><input id="impBoard" placeholder="Tamil Nadu State Board"></div>
@@ -338,25 +358,26 @@
           <input type="hidden" id="impLanguage" value="Tamil">
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:1rem">
-          <button class="btn btn-primary" onclick="scanImporterSource()">Scan Links</button>
+          <button class="btn btn-primary" onclick="scanImporterSource()">Scan This Source</button>
           <button class="btn btn-sm" onclick="saveImporterSource()">Save Source</button>
           <button class="btn btn-sm" onclick="loadImporterSources()">Refresh Saved Sources</button>
         </div>
-        <p class="note">Tamil-only import: only Tamil Medium sections are included. English/Kannada/Urdu/Telugu/other medium sections and English subject books are hidden by default. The scanner downloads PDF/Google Drive PDF links only.</p>
+        <p class="note">Add your own textbook source URLs. The scanner will find Tamil medium PDFs only.</p>
       </div>
 
       <div class="card">
-        <div class="card-title">Saved Sources</div>
+        <div class="card-title">📋 Saved Sources</div>
         <div id="importerSources" class="note">No sources loaded.</div>
       </div>
 
+      <!-- STEP 2: Download -->
       <div class="card" id="importerResultsCard" style="display:none">
-        <div class="card-title">Discovered PDFs</div>
+        <div class="card-title">📥 Download Tamil Medium Books</div>
         <div id="importerSummary" class="note"></div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin:0.75rem 0">
-          <button class="btn btn-primary btn-sm" onclick="downloadSelectedImporterItems()">Download selected + Process DB</button>
-          <button class="btn btn-sm" onclick="toggleImporterItems(true)">Select all</button>
-          <button class="btn btn-sm" onclick="toggleImporterItems(false)">Select none</button>
+          <button class="btn btn-primary" onclick="downloadSelectedImporterItems()">Download Selected Books</button>
+          <button class="btn btn-sm" onclick="toggleImporterItems(true)">Select All</button>
+          <button class="btn btn-sm" onclick="toggleImporterItems(false)">Select None</button>
           <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-left:8px;color:var(--text2)"><input type="checkbox" id="impRebuildMeaning" checked> Rebuild meaning data after import</label>
         </div>
         <div id="importerDownloadProgress" class="note" style="display:none;margin:10px 0;padding:10px;border:1px solid var(--border);border-radius:8px;background:#fff">
@@ -366,6 +387,46 @@
         </div>
         <div class="table-wrap"><table><thead><tr><th></th><th>Class</th><th>Term</th><th>Subject</th><th>Source page</th></tr></thead><tbody id="importerResultsBody"></tbody></table></div>
       </div>
+
+      <!-- STEP 3: Process Files -->
+      <div class="card">
+        <div class="card-title">🔧 Process Downloaded Books</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin:0.75rem 0">
+          <button class="btn btn-secondary" onclick="compressDownloadedPDFs()">Compress PDFs (Reduce Size)</button>
+          <div style="display:flex;flex-direction:column;gap:4px">
+            <label style="font-size:13px;color:var(--text2)">Extract text from:</label>
+            <select id="extractSource" style="padding:6px;border:1px solid var(--border);border-radius:4px;font-size:13px">
+              <option value="original">Original PDFs</option>
+              <option value="compressed">Compressed PDFs</option>
+            </select>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:4px">
+            <label style="font-size:13px;color:var(--text2)">OCR engine:</label>
+            <select id="extractBackend" style="padding:6px;border:1px solid var(--border);border-radius:4px;font-size:13px">
+              <option value="auto">Auto (Paddle if installed)</option>
+              <option value="tesseract">Tesseract Tamil</option>
+              <option value="paddle">PaddleOCR Tamil</option>
+            </select>
+          </div>
+          <button class="btn btn-secondary" onclick="extractTextFromPDFs()">Extract Text (OCR)</button>
+        </div>
+        <div id="extractProgress" class="note" style="display:none;margin:10px 0;padding:10px;border:1px solid var(--border);border-radius:8px;background:#fff">
+          <div id="extractProgressText">Preparing…</div>
+          <div class="progress-bar" style="display:block;margin-top:8px"><div class="progress-fill" id="extractProgressFill" style="width:0%"></div></div>
+          <div id="extractProgressRecent" style="font-size:11px;color:var(--text3);margin-top:8px;max-height:120px;overflow:auto"></div>
+        </div>
+        <p class="note">After downloading, compress PDFs to save space, then extract text using OCR for word analysis.</p>
+      </div>
+
+      <!-- STEP 4: Load to Database -->
+      <div class="card">
+        <div class="card-title">💾 Load Words to Database</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin:0.75rem 0">
+          <button class="btn btn-success" onclick="loadExtractedText()">Load Text Files to Grade Database</button>
+        </div>
+        <p class="note">Convert extracted text files into the grade database that powers the readability analyzer.</p>
+      </div>
+
     </div>
 
     <!-- ANALYZE PAGE -->
@@ -393,6 +454,22 @@
           <div style="margin-top:1rem; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
             <button class="btn btn-primary" id="extractBtn" disabled onclick="runExtract()">▶ Extract & detect</button>
             <button class="btn btn-sm" onclick="clearTarget()">Clear</button>
+            <label style="margin-left:auto; display:flex; gap:8px; align-items:center; font-size:13px; color:var(--text2); cursor:pointer;">
+              <input type="checkbox" id="analyzeDetailedFeatures" /> Detailed Analysis (idioms, grammar, illustration cues)
+            </label>
+          </div>
+          <div style="margin-top:1rem; display:flex; gap:20px; align-items:center; flex-wrap:wrap;">
+            <label style="font-size:13px; color:var(--text2);">Grade Range for Suitability:</label>
+            <div style="display:flex; gap:10px; align-items:center;">
+              <span style="font-size:12px;">Min:</span>
+              <input type="range" id="gradeMinSlider" min="1" max="12" value="1" style="width:100px;" oninput="updateGradeLabels()">
+              <span id="gradeMinLabel" style="font-size:12px; width:20px;">1</span>
+            </div>
+            <div style="display:flex; gap:10px; align-items:center;">
+              <span style="font-size:12px;">Max:</span>
+              <input type="range" id="gradeMaxSlider" min="1" max="12" value="12" style="width:100px;" oninput="updateGradeLabels()">
+              <span id="gradeMaxLabel" style="font-size:12px; width:20px;">12</span>
+            </div>
           </div>
           <div class="status-msg" id="statusMsg"></div>
           <div class="progress-bar" id="progressBar" style="display:none"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
@@ -433,6 +510,11 @@
       <!-- Step 3: Results -->
       <div id="stepResults" style="display:none">
         <div class="metrics" id="metricsRow"></div>
+
+        <div class="card" id="paragraphCard" style="display:none">
+          <div class="card-title"></div>
+          <div id="paragraphContent"></div>
+        </div>
 
         <div class="card" id="v27OfflineCard" style="display:none">
           <div class="card-title">v27 Offline Intelligence</div>
@@ -544,6 +626,14 @@
           <div id="unknownWordCloud" class="word-cloud"></div>
         </div>
 
+        <div class="card" id="tamilFeaturesCard" style="display:none">
+          <div class="card-title">
+            <span>Tamil Features Analysis</span>
+            <button class="btn btn-sm" onclick="runTamilFeatures()">Analyze Tamil features</button>
+          </div>
+          <div id="tamilFeaturesContent"></div>
+        </div>
+
         <div style="display:flex; gap:10px; flex-wrap:wrap;">
           <button class="btn btn-primary btn-sm" id="exportBtn" onclick="exportExcel()">⬇ Export to Excel</button>
           <button class="btn btn-purple btn-sm" id="reportBtn" onclick="generateReport()">📄 Download PDF Report</button>
@@ -589,8 +679,8 @@
 
     <!-- CHECKER PAGE -->
     <div class="page" id="page-checker">
-      <div class="page-title">Paragraph Checker</div>
-      <div class="page-sub">Paste any Tamil paragraph, sentence, or word list. The checker runs the same comprehension analysis as the full book analyzer — showing which standard can read it, inline word highlighting, and a sentence-by-sentence breakdown.</div>
+      <div class="page-title">Tamil Text Review</div>
+      <div class="page-sub">Paste any Tamil text, paragraph, sentence, or word list. Instantly see word-level difficulty, comprehension by grade, and sentence complexity — same analysis as full book checker.</div>
 
       <div class="card">
         <div class="card-title">Enter Tamil text</div>
@@ -598,6 +688,9 @@
         <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
           <button class="btn btn-primary" onclick="runChecker()">▶ Check paragraph</button>
           <button class="btn btn-sm" onclick="clearChecker()">Clear</button>
+          <label style="margin-left:auto; display:flex; gap:8px; align-items:center; font-size:13px; color:var(--text2); cursor:pointer;">
+            <input type="checkbox" id="checkerDetailedFeatures" /> Detailed Analysis (idioms, grammar, illustration cues)
+          </label>
           <span id="checkerStatus" style="font-size:13px;color:var(--text3)"></span>
         </div>
       </div>
@@ -619,6 +712,11 @@
             </div>
           </div>
           <div id="checkerHighlight" style="font-size:16px;line-height:2.2;padding:4px 0"></div>
+        <div class="card" id="checkerGradeSummaryCard" style="display:none; margin-top:12px">
+          <div class="card-title">Grade Suitability Summary</div>
+          <div id="checkerGradeSummary"></div>
+          <p class="note" style="margin-top:0.75rem">This shows the percentage of unique words already familiar to students from each cumulative grade level.</p>
+        </div>
           <div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:8px;font-size:12px">
             <span style="background:#E1F5EE;color:#0F6E56;padding:3px 10px;border-radius:4px;font-weight:500">Std 1–3</span>
             <span style="background:#EBF3FC;color:#1a5fa8;padding:3px 10px;border-radius:4px;font-weight:500">Std 4–6</span>
@@ -761,8 +859,8 @@
       </div>
     </div>
 
-    <!-- TAMIL FEATURES PAGE -->
-    <div class="page" id="page-tamil-features">
+    <!-- TAMIL FEATURES PAGE (Hidden - now integrated into Analyze a Book) -->
+    <div class="page" id="page-tamil-features" style="display:none">
       <div class="page-title">Tamil Features</div>
       <div class="page-sub">Offline Tamil-specific support for children’s books: poem/prose, idioms, grammar load, rewrite levels, vocabulary ladder, illustration cues, and read-aloud script.</div>
 
@@ -1581,6 +1679,90 @@ async function loadImporterSources() {
   } catch(e) { el.textContent = 'Could not load sources.'; }
 }
 
+const DEFAULT_SOURCES = {
+  samacheer: {
+    name: 'Samacheer Kalvi',
+    url: 'https://www.tntextbooks.in/p/school-books.html',
+    board: 'Tamil Nadu State Board',
+    tamil_only: true,
+    exclude_english: true,
+    language: 'Tamil'
+  },
+  ncert: {
+    name: 'NCERT Tamil',
+    url: 'https://ncert.nic.in/textbook.php',
+    board: 'NCERT',
+    tamil_only: true,
+    exclude_english: true,
+    language: 'Tamil'
+  },
+  cbse: {
+    name: 'CBSE Tamil',
+    url: 'https://cbseacademic.nic.in/curriculum.html',
+    board: 'CBSE',
+    tamil_only: true,
+    exclude_english: true,
+    language: 'Tamil'
+  }
+};
+
+async function addDefaultSource(sourceKey) {
+  const source = DEFAULT_SOURCES[sourceKey];
+  if (!source) { toast('Unknown source'); return; }
+  
+  const res = await fetch('/api/importer/sources', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(source)});
+  const data = await res.json();
+  if (data.error) { toast(data.error); return; }
+  toast(`${source.name} source added`);
+  loadImporterSources();
+  // Auto-scan the source
+  await runImporterScan(source);
+}
+
+async function loadAllDefaultSources() {
+  if (!confirm('This will add Samacheer Kalvi, NCERT, and CBSE sources and scan for all Tamil medium textbooks (classes 1-12). This may take several minutes. Continue?')) return;
+  
+  setLoading(true, 'Adding default sources and scanning for Tamil medium textbooks…');
+  try {
+    // Add all default sources
+    for (const [key, source] of Object.entries(DEFAULT_SOURCES)) {
+      const res = await fetch('/api/importer/sources', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(source)});
+      const data = await res.json();
+      if (data.error) { console.warn(`Failed to add ${key}:`, data.error); }
+    }
+    
+    // Load sources and scan all
+    await loadImporterSources();
+    
+    // Scan each source for Tamil medium books
+    let allItems = [];
+    for (const [key, source] of Object.entries(DEFAULT_SOURCES)) {
+      try {
+        const res = await fetch('/api/importer/scan', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({source, depth:2, max_pages:50})});
+        const data = await res.json();
+        if (data.items) {
+          allItems = allItems.concat(data.items);
+        }
+      } catch(e) {
+        console.warn(`Failed to scan ${key}:`, e);
+      }
+    }
+    
+    setLoading(false);
+    if (allItems.length > 0) {
+      importerItems = allItems;
+      renderImporterResults({items: allItems, pages_scanned: ['multiple sources']});
+      document.getElementById('importerResultsCard').style.display = 'block';
+      toast(`Found ${allItems.length} Tamil medium textbooks from default sources`);
+    } else {
+      toast('No textbooks found from default sources');
+    }
+  } catch(e) {
+    setLoading(false);
+    toast('Failed to load default sources');
+  }
+}
+
 function currentImporterSource() {
   return {
     name: document.getElementById('impName').value.trim() || 'Textbook Source',
@@ -1719,6 +1901,124 @@ async function pollImporterJob(jobId) {
       if (progressText) progressText.textContent = 'Waiting for job update…';
     }
     if (!done) await new Promise(resolve => setTimeout(resolve, 1500));
+  }
+}
+
+async function compressDownloadedPDFs() {
+  if (!confirm('Compress all PDFs in textbooks_imported/ to reduce file sizes? This will create compressed versions in textbooks_imported_compressed/.')) return;
+  setLoading(true, 'Compressing PDFs…');
+  try {
+    const res = await fetch('/api/importer/compress_pdfs', {method:'POST'});
+    const data = await res.json();
+    setLoading(false);
+    if (data.error) { toast('Compression failed: ' + data.error); return; }
+    toast('PDF compression complete');
+  } catch(e) {
+    setLoading(false); toast('Compression failed');
+  }
+}
+
+async function extractTextFromPDFs() {
+  const sourceType = document.getElementById('extractSource').value; // 'original' or 'compressed'
+  const ocrBackend = document.getElementById('extractBackend')?.value || 'auto';
+  const backendLabel = ocrBackend === 'auto' ? 'Auto OCR' : (ocrBackend === 'paddle' ? 'PaddleOCR Tamil' : 'Tesseract Tamil');
+  const confirmMsg = sourceType === 'compressed'
+    ? `Extract text from compressed PDFs in textbooks_imported_compressed/ using ${backendLabel}?`
+    : `Extract text from original PDFs in textbooks_imported/ using ${backendLabel}?`;
+
+  if (!confirm(confirmMsg)) return;
+  const progressBox = document.getElementById('extractProgress');
+  const progressText = document.getElementById('extractProgressText');
+  const progressFill = document.getElementById('extractProgressFill');
+  const progressRecent = document.getElementById('extractProgressRecent');
+  if (progressBox) progressBox.style.display = 'block';
+  if (progressText) progressText.textContent = `Starting text extraction from ${sourceType} PDFs using ${backendLabel}…`;
+  if (progressFill) progressFill.style.width = '0%';
+  if (progressRecent) progressRecent.innerHTML = '';
+  try {
+    const res = await fetch('/api/importer/extract_text_async', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({source: sourceType, ocr_backend: ocrBackend})
+    });
+    const data = await res.json();
+    if (data.error) { toast('Text extraction failed: ' + data.error); return; }
+    toast('Text extraction started in background');
+    await pollExtractTextJob(data.job_id, sourceType);
+  } catch(e) {
+    if (progressText) progressText.textContent = 'Text extraction failed to start';
+    toast('Text extraction failed');
+  }
+}
+
+async function pollExtractTextJob(jobId, sourceType) {
+  const progressText = document.getElementById('extractProgressText');
+  const progressFill = document.getElementById('extractProgressFill');
+  const progressRecent = document.getElementById('extractProgressRecent');
+  let done = false;
+  while (!done) {
+    try {
+      const res = await fetch(`/api/importer/job_status/${jobId}`);
+      const job = await res.json();
+      if (res.status === 404) {
+        if (progressText) progressText.textContent = 'Text extraction job was reset. Please start extraction again.';
+        if (progressFill) progressFill.style.width = '0%';
+        toast('Text extraction job was reset. Please start extraction again.');
+        done = true;
+        continue;
+      }
+      if (job.error && job.status !== 'error') throw new Error(job.error);
+
+      const total = job.total || 0;
+      const processed = job.processed || 0;
+      const errors = job.errors || 0;
+      const active = Array.isArray(job.active) ? job.active : [];
+      const current = active[0];
+      const activeText = current
+        ? `Processing ${current.index}/${total}: ${current.file}`
+        : (job.message || `Processed ${processed}/${total || '?'} PDFs`);
+      const suffix = total ? ` · completed ${processed}/${total} · errors ${errors}` : '';
+      const pct = total ? Math.round((processed / total) * 100) : 0;
+
+      if (job.status === 'done') {
+        if (progressText) progressText.textContent = job.message || 'Text extraction completed';
+        if (progressFill) progressFill.style.width = '100%';
+        toast(job.message || 'Text extraction completed');
+        done = true;
+      } else if (job.status === 'error') {
+        if (progressText) progressText.textContent = 'Text extraction failed: ' + (job.error || job.message || 'Unknown error');
+        toast('Text extraction failed: ' + (job.error || job.message || 'Unknown error'));
+        done = true;
+      } else {
+        if (progressText) progressText.textContent = `${activeText}${suffix}`;
+        if (progressFill) progressFill.style.width = `${Math.max(0, Math.min(100, pct))}%`;
+        if (progressRecent && Array.isArray(job.recent)) {
+          progressRecent.innerHTML = job.recent.slice(-8).reverse().map(r => {
+            const marker = r.ok ? '✓' : '⚠';
+            const note = r.error ? ' — ' + r.error : '';
+            return `<div>${marker} ${r.file || 'file'}${note}</div>`;
+          }).join('');
+        }
+      }
+    } catch(e) {
+      if (progressText) progressText.textContent = `Extracting text from ${sourceType} PDFs… waiting for status update`;
+    }
+    if (!done) await new Promise(resolve => setTimeout(resolve, 1200));
+  }
+}
+
+async function loadExtractedText() {
+  if (!confirm('Load all text files from textbooks_imported_text/ into the grade database?')) return;
+  setLoading(true, 'Loading text files to database…');
+  try {
+    const res = await fetch('/api/importer/load_text', {method:'POST'});
+    const data = await res.json();
+    setLoading(false);
+    if (data.error) { toast('Loading failed: ' + data.error); return; }
+    toast('Text files loaded to database');
+    await loadGrades();
+  } catch(e) {
+    setLoading(false); toast('Loading failed');
   }
 }
 // ── Grade database ────────────────────────────────────────────────────────────
@@ -2016,6 +2316,27 @@ function deselectAllPn() {
   updatePnCount();
 }
 
+function updateGradeLabels() {
+  const minSlider = document.getElementById('gradeMinSlider');
+  const maxSlider = document.getElementById('gradeMaxSlider');
+  const minLabel = document.getElementById('gradeMinLabel');
+  const maxLabel = document.getElementById('gradeMaxLabel');
+  const minVal = parseInt(minSlider.value);
+  const maxVal = parseInt(maxSlider.value);
+  minLabel.textContent = minVal;
+  maxLabel.textContent = maxVal;
+  // Ensure min <= max
+  if (minVal > maxVal) {
+    maxSlider.value = minVal;
+    maxLabel.textContent = minVal;
+  }
+  // Ensure max >= min
+  if (maxVal < minVal) {
+    minSlider.value = maxVal;
+    minLabel.textContent = maxVal;
+  }
+}
+
 async function runAnalysis() {
   const properNounStems = Object.entries(pnSelections)
     .filter(([,v]) => v).map(([k]) => k);
@@ -2029,10 +2350,12 @@ async function skipProperNouns() {
 async function _doAnalyze(pendingId, properNounStems) {
   setLoading(true, 'Running readability analysis…');
   try {
+    const gradeMin = parseInt(document.getElementById('gradeMinSlider').value);
+    const gradeMax = parseInt(document.getElementById('gradeMaxSlider').value);
     const res = await fetch('/api/analyze', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({pending_id: pendingId, proper_noun_stems: properNounStems})
+      body: JSON.stringify({pending_id: pendingId, proper_noun_stems: properNounStems, grade_min: gradeMin, grade_max: gradeMax})
     });
     const data = await res.json();
     setLoading(false);
@@ -2042,6 +2365,11 @@ async function _doAnalyze(pendingId, properNounStems) {
     document.getElementById('stepReview').style.display = 'none';
     document.getElementById('stepResults').style.display = 'block';
     setStep(3);
+    
+    // Load Tamil Features if checkbox is enabled
+    if (document.getElementById('analyzeDetailedFeatures').checked) {
+      await loadDetailedAnalysis(pendingData.text || '');
+    }
   } catch(e) {
     setLoading(false);
     toast('Analysis failed');
@@ -2058,7 +2386,24 @@ function renderResults(data) {
     <div class="metric"><div class="metric-label">Total words</div><div class="metric-value">${data.total_words.toLocaleString()}</div></div>
     <div class="metric"><div class="metric-label">Unique stems</div><div class="metric-value">${data.stems_analyzed.toLocaleString()}</div></div>
     <div class="metric"><div class="metric-label">Proper nouns (as known)</div><div class="metric-value purple">${pnCount}</div></div>
-    <div class="metric"><div class="metric-label">Readable from</div><div class="metric-value teal">${firstReadable ? 'Std ' + firstReadable.grade : 'Beyond 12'}</div></div>`;
+    <div class="metric"><div class="metric-label">Readable from</div><div class="metric-value teal">${firstReadable ? 'Std ' + firstReadable.grade : 'Beyond 12'}</div></div>
+    <div class="metric"><div class="metric-label">Suitable for Grades ${data.grade_min}-${data.grade_max}</div><div class="metric-value green">${data.grade_range_suitable_pct}%</div></div>
+    <div class="metric"><div class="metric-label">New words in range</div><div class="metric-value orange">${data.grade_range_new_pct}%</div></div>`;
+
+  // Per-paragraph suitability card
+  const paraCard = document.getElementById('paragraphCard');
+  if (data.paragraphs && data.paragraphs.length) {
+    paraCard.style.display = 'block';
+    paraCard.querySelector('.card-title').textContent = `Per-Paragraph Suitability (Grades ${data.grade_min}-${data.grade_max})`;
+    document.getElementById('paragraphContent').innerHTML = data.paragraphs.map(p => `
+        <div class="para-item" style="border:1px solid #ddd; padding:8px; margin:4px 0; background: ${p.suitable_pct >= 80 ? '#e8f5e8' : p.suitable_pct >= 60 ? '#fff3cd' : '#f8d7da'};">
+            <div style="font-weight:bold; color: ${p.suitable_pct >= 80 ? 'green' : p.suitable_pct >= 60 ? 'orange' : 'red'};">${p.suitable_pct}% suitable</div>
+            <div style="font-size:14px;">${p.text.replace(/\n/g, '<br>')}</div>
+        </div>
+    `).join('');
+  } else {
+    paraCard.style.display = 'none';
+  }
 
   // Proper noun cloud
   const pnCard = document.getElementById('properNounSummaryCard');
@@ -2534,6 +2879,11 @@ async function runChecker() {
     _checkerData = data;
     renderCheckerResults(data);
     document.getElementById('checkerResults').style.display = 'block';
+    
+    // Load Tamil Features if checkbox is enabled
+    if (document.getElementById('checkerDetailedFeatures').checked) {
+      await loadDetailedAnalysisChecker(text);
+    }
   } catch(e) {
     document.getElementById('checkerStatus').textContent = '';
     toast('Check failed');
@@ -4189,6 +4539,98 @@ function updateSettingsScanPanel(d) {
   }).join('') || '<tr><td colspan="4" style="color:var(--text3);font-size:12px">No files actively processing</td></tr>';
 }
 
+// ── Detailed Analysis (Tamil Features) ─────────────────────────────────────
+async function loadDetailedAnalysis(text) {
+  try {
+    const res = await fetch('/api/tamil_features/analyze', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({text})
+    });
+    const d = await res.json();
+    if (d.error) return;
+    renderTamilFeaturesCard(d, 'analyze');
+  } catch(e) {
+    console.error('Failed to load detailed analysis:', e);
+  }
+}
+
+async function loadDetailedAnalysisChecker(text) {
+  try {
+    const res = await fetch('/api/tamil_features/analyze', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({text})
+    });
+    const d = await res.json();
+    if (d.error) return;
+    renderTamilFeaturesCard(d, 'checker');
+  } catch(e) {
+    console.error('Failed to load detailed analysis:', e);
+  }
+}
+
+function renderTamilFeaturesCard(data, context) {
+  let targetId = context === 'checker' ? 'checkerResults' : 'stepResults';
+  let container = document.getElementById(targetId);
+  if (!container) return;
+  
+  const html = `
+    <div class="card" id="detailedFeaturesCard" style="margin-top:20px">
+      <div class="card-title">🪶 Detailed Analysis — Tamil Features</div>
+      <div class="metrics">
+        <div class="metric">
+          <div class="metric-label">Type</div>
+          <div class="metric-value">${data.poem_prose?.type || '—'}</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Poetry score</div>
+          <div class="metric-value">${data.poem_prose?.poem_score || '—'}</div>
+        </div>
+      </div>
+      
+      ${data.idioms && data.idioms.length ? `<div class="card" style="margin-top:12px;background:var(--surface2)">
+        <div class="card-title">Idioms & Proverbs (${data.idioms.length})</div>
+        <div>${data.idioms.slice(0,10).map(i => `<div style="font-size:13px;margin-bottom:8px"><b>${i.phrase}</b>: ${i.meaning}</div>`).join('')}</div>
+        ${data.idioms.length > 10 ? `<p style="font-size:12px;color:var(--text3)">+${data.idioms.length - 10} more idioms</p>` : ''}
+      </div>` : ''}
+      
+      ${data.grammar ? `<div class="card" style="margin-top:12px;background:var(--surface2)">
+        <div class="card-title">Grammar Load</div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
+          <div><span style="font-size:12px;color:var(--text3)">Complexity</span><br><span style="font-weight:600">${data.grammar.label || '—'}</span></div>
+          <div><span style="font-size:12px;color:var(--text3)">Difficulty score</span><br><span style="font-weight:600">${data.grammar.score || '—'}</span></div>
+          <div><span style="font-size:12px;color:var(--text3)">Avg sentence words</span><br><span style="font-weight:600">${data.grammar.avg_sentence_words || '—'}</span></div>
+        </div>
+      </div>` : ''}
+      
+      ${data.vocabulary_ladder && data.vocabulary_ladder.length ? `<div class="card" style="margin-top:12px;background:var(--surface2)">
+        <div class="card-title">Vocabulary Ladder</div>
+        <div>${data.vocabulary_ladder.slice(0,8).map((v,i) => `<div style="font-size:13px;margin-bottom:6px"><span style="color:var(--text3)">${i+1}.</span> ${v.word || v}</div>`).join('')}</div>
+      </div>` : ''}
+      
+      ${data.illustration_cues ? `<div class="card" style="margin-top:12px;background:var(--surface2)">
+        <div class="card-title">Illustration Cues</div>
+        <div style="font-size:13px;color:var(--text2)">${data.illustration_cues.suggestion || 'Visual support recommended for clarity'}</div>
+        ${data.illustration_cues.cue_words && data.illustration_cues.cue_words.length ? `
+          <div style="margin-top:8px;font-size:12px">
+            <b>Key visual concepts:</b> ${data.illustration_cues.cue_words.slice(0,6).join(', ')}
+          </div>
+        ` : ''}
+      </div>` : ''}
+    </div>`;
+  
+  if (context === 'checker') {
+    const existing = document.getElementById('detailedFeaturesCard');
+    if (existing) existing.remove();
+    container.insertAdjacentHTML('beforeend', html);
+  } else {
+    const existing = document.getElementById('detailedFeaturesCard');
+    if (existing) existing.remove();
+    container.insertAdjacentHTML('beforeend', html);
+  }
+}
+
 // ── Reading Practice ─────────────────────────────────────────────────────────
 let _readingRecorder = null;
 let _readingChunks = [];
@@ -4222,11 +4664,16 @@ async function loadReadingAsrStatus() {
 
 async function loadReadingPassage() {
   const grade = document.getElementById('readingGrade')?.value || 1;
-  const r = await fetch(`/api/reading/passage?grade=${grade}`);
+  const passageEl = document.getElementById('readingPassage');
+  const metaEl = document.getElementById('readingPassageMeta');
+  const resultCard = document.getElementById('readingResultCard');
+  if (passageEl) passageEl.textContent = 'Loading paragraph…';
+  if (metaEl) metaEl.textContent = '';
+  const r = await fetch(`/api/reading/passage?grade=${grade}&_=${Date.now()}`, {cache: 'no-store'});
   const d = await r.json();
-  document.getElementById('readingPassage').textContent = d.text;
-  document.getElementById('readingPassageMeta').textContent = `Standard ${d.grade} · ${d.word_count} Tamil words`;
-  document.getElementById('readingResultCard').style.display = 'none';
+  if (passageEl) passageEl.textContent = d.text;
+  if (metaEl) metaEl.textContent = `Standard ${d.grade} · ${d.word_count} Tamil words`;
+  if (resultCard) resultCard.style.display = 'none';
 }
 
 function _readingTick() {

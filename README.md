@@ -377,3 +377,46 @@ The analyzer still works fully offline without AI using v27 rule-based intellige
 - If Local AI/Ollama is enabled, users can generate Author suggestions or Teacher lesson help from a compact analysis summary.
 - The full book/PDF is not sent to AI; only top difficult words, concepts, sentence examples, scores, and glossary candidates are used.
 - AI outputs are cached under data/cache/ai/ per analysis, mode, and model.
+
+## Tamil OCR backend
+
+This build includes a Python OCR adapter inspired by `khaleeljageer/OCR-Tamil`, which is a Tesseract 4 based Tamil OCR Android project. The Android/Kotlin code is not copied into this Flask app; instead the server uses the same OCR approach with `pytesseract` + `pdf2image`:
+
+`PDF page -> image -> Tesseract Tamil model (tam.traineddata) -> Tamil Unicode text -> Tamil word extraction`
+
+Install system packages on Ubuntu/Debian:
+
+```bash
+sudo apt update
+sudo apt install -y tesseract-ocr tesseract-ocr-tam poppler-utils
+pip install -r requirements.txt
+```
+
+The OCR-Tamil-style backend is enabled by default. To disable it and use only the older built-in fallback:
+
+```bash
+export TAMIL_ANALYZER_USE_OCR_TAMIL_BACKEND=0
+```
+
+For harder Tamil PDF scans, the bulk textbook extractor can also use optional PaddleOCR Tamil. `start.sh` tries to install these packages automatically during setup. If you need to retry manually:
+
+```bash
+pip install -r requirements-paddleocr.txt
+```
+
+Then choose `Auto (Paddle if installed)` or `PaddleOCR Tamil` in the importer UI. In `Auto`, PaddleOCR is tried first when installed and the app falls back to the Tesseract Tamil backend if PaddleOCR is unavailable or produces no usable Tamil text.
+
+To skip PaddleOCR package installation on a low-space or offline machine:
+
+```bash
+export TAMIL_ANALYZER_SKIP_PADDLEOCR=1
+./start.sh
+```
+
+Useful OCR settings:
+
+```bash
+export TAMIL_ANALYZER_OCR_DPI=300
+export TAMIL_ANALYZER_OCR_TIMEOUT=90
+export TAMIL_ANALYZER_OCR_MAX_PAGES=0   # 0 means all pages
+```
