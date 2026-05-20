@@ -11,12 +11,16 @@ logs/
 uploads/
 reports/
 textbooks_imported/
+textbooks_imported_text/
 
 # Local databases and caches
 *.db
 *.sqlite
 *.sqlite3
 data/cache/
+data/corpus_sources/
+data/tamil_corpus/
+data/wiki_dumps/
 
 # Downloaded/built third-party ASR dependency.
 # start.sh recreates this on first startup when needed.
