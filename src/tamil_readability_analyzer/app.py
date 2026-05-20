@@ -1,4 +1,4 @@
-import os, re, json, random, sqlite3, datetime, io, math, hashlib, threading, logging, uuid, time
+import os, re, json, random, sqlite3, datetime, io, math, hashlib, threading, logging, uuid, time, tempfile, html
 from pathlib import Path
 import werkzeug.utils
 from . import analytics as _analytics
@@ -9,6 +9,9 @@ from . import textbook_importer as _importer
 from . import reading_asr as _reading_asr
 from . import reading_score as _reading_score
 from . import tamil_features as _tamil_features
+from . import corpus_readability as _corpus_readability
+from . import level_norms as _level_norms
+from . import tamil_morphology as _tamil_morphology
 
 # Suppress pdfminer's "Cannot set [non-]stroke color" warnings.
 # These appear when parsing PDFs that use DeviceN/Spot colorspaces (common in
@@ -625,8 +628,82 @@ def _repair_tamil_ocr_glyph_patterns(text):
 def _fix_common_tamil_ocr_errors(text):
     """Conservative Tamil OCR cleanup; add verified textbook-specific fixes here."""
     text = _normalize_tamil_text(text)
+    # OCR sometimes emits a standalone pulli before a word, e.g.
+    # "்நம்பிக்லகக்குரிய". A pulli cannot start a Tamil word.
+    text = re.sub(r'(?<![\u0B80-\u0BFF])\u0BCD(?=[\u0B80-\u0BFF])', '', text)
     text = _repair_tamil_ocr_glyph_patterns(text)
     corrections = {
+        'நம்பிக்லகக்குரிய': 'நம்பிக்கைக்குரிய',
+        'ஆசிரியர்கநள': 'ஆசிரியர்களே',
+        'வகுப்பலைலய': 'வகுப்பறையை',
+        'ந்நயமிக்க': 'நயமிக்க',
+        'இடைநாக': 'இடமாக',
+        'ந்நநாக்நகநாடு': 'நோக்கோடு',
+        'இப்பநாடநூலில்': 'இப்பாடநூலில்',
+        'இப்பநாடநூல்': 'இப்பாடநூல்',
+        'வடிவலைக்கப்பட்டுள்ளது': 'வடிவமைக்கப்பட்டுள்ளது',
+        'மைமகிழ்': 'மனமகிழ்',
+        'பக்்கங்்கள்': 'பக்கங்கள்',
+        'வலரயிைநான': 'வரையிலான',
+        'குழந்லதகள்': 'குழந்தைகள்',
+        'விருப்பம்நபநால்': 'விருப்பம்போல்',
+        'பநாடி': 'பாடி',
+        'விலளயநாடி': 'விளையாடி',
+        'ஒருவநரநாடு': 'ஒருவரோடு',
+        'ஏதுவநாக': 'ஏதுவாக',
+        'தொசயல்்கள்': 'செயல்கள்',
+        'உற்றுந்நநாக்கல்': 'உற்றுநோக்கல்',
+        'ஒத்திலெவு': 'ஒத்திசைவு',
+        'உருவங்கலள': 'உருவங்களை',
+        'நவறுபடுத்தியும்': 'வேறுபடுத்தியும்',
+        'பநார்த்தல்': 'பார்த்தல்',
+        'நுண்தலெ': 'நுண்தசை',
+        'நபநான்ைலவ': 'போன்றவை',
+        'வெயல்களநாக': 'செயல்களாக',
+        'வகநாடுக்கப்பட்டுள்ளன': 'கொடுக்கப்பட்டுள்ளன',
+        'படிநினல்கள்': 'படிநிலைகள்',
+        'எழுத்துகநளநாடு': 'எழுத்துகளோடு',
+        'ஒலிலய': 'ஒலியை',
+        'எழுத்துகலள': 'எழுத்துகளை',
+        'தனியநாகவும்': 'தனியாகவும்',
+        'வெநாற்வைநாடரிலும்': 'சொற்றொடரிலும்',
+        'வெநாற்களிலும்': 'சொற்களிலும்',
+        'அலடயநாளம்': 'அடையாளம்',
+        'கநாணல்': 'காணல்',
+        'ைதிப்பீடு': 'மதிப்பீடு',
+        'என்ை': 'என்ற',
+        'அலைக்கப்பட்டுள்ளன': 'அமைக்கப்பட்டுள்ளன',
+        'அடிப்பலடயில்': 'அடிப்படையில்',
+        'உயிதொரழுத்து்கள்': 'உயிரெழுத்துக்கள்',
+        'ஒநர': 'ஒரே',
+        'நநாளில்': 'நாளில்',
+        '்நநாளில்': 'நாளில்',
+        'நலடவபறுகின்ை': 'நடைபெறுகின்ற',
+        '்நலடவபறுகின்ை': 'நடைபெறுகின்ற',
+        'படக்கநாட்சிகலள': 'படக்காட்சிகளை',
+        'பநாடப்பகுதிகள்': 'பாடப்பகுதிகள்',
+        'வகநாண்ட': 'கொண்ட',
+        'வதநாடர்நிகழ்வுகள்': 'தொடர்நிகழ்வுகள்',
+        'கலதயநாக': 'கதையாக',
+        'உயிவரழுத்துகலள': 'உயிரெழுத்துகளை',
+        'வெய்வதற்கநாக': 'செய்வதற்காக',
+        'தொமய்தொயழுத்து்கள்': 'மெய்யெழுத்துக்கள்',
+        'சிந்தலனலய': 'சிந்தனையை',
+        'வைய்வயழுத்துகள்': 'மெய்யெழுத்துகள்',
+        'அலைந்துள்ளது': 'அமைந்துள்ளது',
+        'புதிர்த்தன்லையுடன்': 'புதிர்த்தன்மையுடன்',
+        'எழுத்ேதொவியங்்கள்': 'எழுத்தோவியங்கள்',
+        'எழுத்நதநாவியங்களில்': 'எழுத்தோவியங்களில்',
+        'நகநாட்நடநாவியங்கலள': 'கோட்டோவியங்களை',
+        'வலரதல்': 'வரைதல்',
+        'குழந்லதகளின்': 'குழந்தைகளின்',
+        'நபநான்ை': 'போன்ற',
+        'வெயல்கள்': 'செயல்கள்',
+        'வெயல்பநாடுகளநாக': 'செயல்பாடுகளாக',
+        'வடிவலைக்கப்பட்டுள்ளன': 'வடிவமைக்கப்பட்டுள்ளன',
+        'வழியநாக': 'வழியாக',
+        'அறிமு்கம்': 'அறிமுகம்',
+        'வெய்யப்படுகிைது': 'செய்யப்படுகிறது',
         'புதுரமயான': 'புதுமையான',
         'வடிவரமப்பு': 'வடிவமைப்பு',
         'பபாருள்': 'பொருள்',
@@ -1109,14 +1186,16 @@ def _split_compound(word):
 def tokenize_tamil(text):
     """
     Extract Tamil words from text with three normalization passes:
-      1. Extract Tamil Unicode tokens (U+0B80–U+0BFF), length >= 2
-      2. Split compound words (வந்தபோது → வந்த + போது)
-      3. Strip trailing sandhi liaison consonants (அவனைத் → அவனை)
+      1. Apply verified OCR cleanup for common Tamil textbook artifacts
+      2. Extract Tamil Unicode tokens (U+0B80–U+0BFF), length >= 2
+      3. Split compound words (வந்தபோது → வந்த + போது)
+      4. Strip trailing sandhi liaison consonants (அவனைத் → அவனை)
 
     The final filter is important for noisy textbook PDFs: compound splitting or
     OCR cleanup can sometimes leave a single combining mark / empty token.
     """
-    raw = re.findall(r'[\u0B80-\u0BFF]{2,}', text or '')
+    text = _fix_common_tamil_ocr_errors(text or '')
+    raw = re.findall(r'[\u0B80-\u0BFF]{2,}', text)
     result = []
     for word in raw:
         for part in _split_compound(word):
@@ -1466,10 +1545,15 @@ def extract_for_review():
     rows = conn.execute('SELECT word FROM grade_words').fetchall()
     conn.close()
     grade_vocab_union = {r['word'] for r in rows}
-    if not grade_vocab_union:
-        return jsonify({'error': 'No school books uploaded yet.'}), 400
 
     flagged = detect_proper_nouns(stem_freq, grade_vocab_union)
+    if not grade_vocab_union:
+        # Without textbook vocabulary, do not flood the proper-noun review with
+        # every low-frequency word. Keep only strong name/place/loanword hints.
+        flagged = {
+            stem: reasons for stem, reasons in flagged.items()
+            if any(reason != 'rare unknown word' for reason in reasons)
+        }
     flagged_list = []
     for stem, reasons in sorted(flagged.items(), key=lambda x: -stem_freq.get(x[0],0)):
         flagged_list.append({
@@ -1565,6 +1649,11 @@ def analyze():
     stem_freq        = json.loads(row['stem_freq_json'])
     target_sent_counts = json.loads(row['sentence_counts'] or '[]')
 
+    try:
+        raw_text = row['raw_text'] if 'raw_text' in row.keys() and row['raw_text'] else ''
+    except Exception:
+        raw_text = ''
+
     all_stems = set(stem_freq.keys())
 
     # Load grade vocab and grade sentence stats
@@ -1581,7 +1670,47 @@ def analyze():
 
     grade_sent_stats = {r['grade']: dict(r) for r in grade_metas}
     available_grades = sorted(grade_vocab.keys())
-    if not available_grades: return jsonify({'error': 'No grade books in database.'}), 400
+    grade_db_loaded = bool(available_grades)
+    fallback_tamil_context = None
+    fallback_child_features = None
+    fallback_estimated_grade = None
+    fallback_unknown_surfaces = []
+    if not grade_db_loaded:
+        # Let book analysis continue even before textbooks are loaded. The
+        # result is explicitly marked as an estimate and uses offline corpus,
+        # morphology, child-level features, and sentence load instead of the
+        # empty grade vocabulary database.
+        available_grades = list(range(1, 13))
+        try:
+            fallback_tamil_context = _corpus_readability.analyze_text(
+                raw_text,
+                corpus=_corpus_readability.load_corpus(),
+                stem_fn=get_stem,
+            )
+        except Exception as e:
+            fallback_tamil_context = {'enabled': False, 'error': str(e)}
+        try:
+            fallback_child_features = _analytics.child_level_features(raw_text, stem_fn=get_stem)
+        except Exception as e:
+            fallback_child_features = {'enabled': False, 'error': str(e)}
+
+        level = (fallback_tamil_context or {}).get('estimated_level') or {}
+        fallback_estimated_grade = level.get('estimated_standard')
+        if not fallback_estimated_grade and (fallback_child_features or {}).get('enabled'):
+            fallback_estimated_grade = fallback_child_features.get('estimated_standard')
+        fallback_estimated_grade = max(1, min(12, int(fallback_estimated_grade or 8)))
+
+        rare = [
+            row.get('stem') for row in (fallback_tamil_context or {}).get('rare_examples', [])
+            if row.get('stem')
+        ]
+        morph_unknown = [
+            row.get('word') for row in ((fallback_tamil_context or {}).get('morphology') or {}).get('unknown_root_examples', [])
+            if row.get('word')
+        ]
+        fallback_unknown_surfaces = sorted(set(
+            stem_to_original.get(s, s) for s in rare[:250]
+        ) | set(morph_unknown[:250]))[:500]
 
     effective_total = len(all_stems)
 
@@ -1599,38 +1728,56 @@ def analyze():
         if g in grade_vocab: cumulative |= grade_vocab[g]
         if g not in available_grades: continue
 
-        vocab_known = all_stems & cumulative
-        known = vocab_known | confirmed_proper
-        unknown = all_stems - known
+        if grade_db_loaded:
+            vocab_known = all_stems & cumulative
+            known = vocab_known | confirmed_proper
+            unknown = all_stems - known
+            comprehension = round(len(known)/effective_total*100, 1) if effective_total else 0.0
+            new_to_student_pct = round(len(unknown)/effective_total*100, 1) if effective_total else 0.0
+            unknown_words_for_row = sorted([stem_to_original.get(s,s) for s in unknown])[:500]
+        else:
+            # Estimated readability curve: the estimated grade should be the
+            # first grade crossing the normal 80% readability threshold.
+            comprehension = round(max(18.0, min(96.0, 80.0 + (g - fallback_estimated_grade) * 7.0)), 1)
+            known_count_est = round(effective_total * comprehension / 100)
+            known = set(list(all_stems)[:known_count_est])
+            unknown = set(list(all_stems)[known_count_est:])
+            new_to_student_pct = round(100.0 - comprehension, 1)
+            unknown_words_for_row = fallback_unknown_surfaces
 
         # New words at this grade = words known now but unknown up to previous grade
-        prev_known = (all_stems & cumulative_prev) | confirmed_proper
-        new_at_this_grade = known - prev_known
-        new_word_list = sorted([stem_to_original.get(s,s) for s in new_at_this_grade])
-
-        comprehension = round(len(known)/effective_total*100, 1) if effective_total else 0.0
-        new_pct       = round(len(new_at_this_grade)/effective_total*100, 1) if effective_total else 0.0
+        if grade_db_loaded:
+            prev_known = (all_stems & cumulative_prev) | confirmed_proper
+            new_at_this_grade = known - prev_known
+            new_word_list = sorted([stem_to_original.get(s,s) for s in new_at_this_grade])
+            new_at_count = len(new_at_this_grade)
+            new_pct = round(len(new_at_this_grade)/effective_total*100, 1) if effective_total else 0.0
+        else:
+            prev_pct = max(18.0, min(96.0, 80.0 + ((g - 1) - fallback_estimated_grade) * 7.0)) if g > 1 else 0.0
+            introduced_pct = max(0.0, comprehension - prev_pct)
+            new_word_list = fallback_unknown_surfaces[:80] if g == fallback_estimated_grade else []
+            new_at_count = round(effective_total * introduced_pct / 100)
+            new_pct = round(introduced_pct, 1)
 
         # Sentence complexity for this grade
         gsm = grade_sent_stats.get(g, {})
-        grade_max = gsm.get('sent_max', 0)
+        grade_sent_max = gsm.get('sent_max', 0)
         grade_avg = gsm.get('sent_avg', 0.0)
 
         # How many target-book sentences exceed this grade's max sentence length?
-        sentences_over = sum(1 for c in target_sent_counts if c > grade_max) if grade_max > 0 else 0
+        sentences_over = sum(1 for c in target_sent_counts if c > grade_sent_max) if grade_sent_max > 0 else 0
         pct_over = round(sentences_over / len(target_sent_counts) * 100, 1) if target_sent_counts else 0.0
 
-        new_to_student_pct = round(len(unknown)/effective_total*100, 1) if effective_total else 0.0
         results.append({
             'grade': g,
             'total_unique_book_words': effective_total,
-            'known_words': len(known),        # words in book already known by student (Std 1–N)
-            'new_words':   len(unknown),      # words in book new to student (not yet learned)
+            'known_words': len(known),        # words in book already known by student (Std 1–N), or estimated fallback count
+            'new_words':   len(unknown),      # words in book new to student (not yet learned), or estimated fallback count
             'known_pct':   comprehension,     # % known
             'new_pct':     new_to_student_pct,# % new to student
-            'new_word_list': sorted([stem_to_original.get(s,s) for s in unknown])[:500],
+            'new_word_list': unknown_words_for_row,
             # Words first introduced at this grade (for Section 3 word lists)
-            'new_at_grade': len(new_at_this_grade),
+            'new_at_grade': new_at_count,
             'new_at_grade_pct': new_pct,
             'new_at_grade_list': new_word_list,
             # Aliases for backward compat
@@ -1639,9 +1786,11 @@ def analyze():
             'found_pct':      comprehension,
             'not_found_pct':  new_to_student_pct,
             'comprehension_pct': comprehension,
-            'unknown_word_list': sorted([stem_to_original.get(s,s) for s in unknown])[:500],
+            'unknown_word_list': unknown_words_for_row,
+            'estimated_only': not grade_db_loaded,
+            'basis': 'TAVI/corpus + Tamil morphology + child-level signals fallback' if not grade_db_loaded else 'Loaded textbook grade vocabulary',
             # Sentence stats
-            'grade_sent_max': grade_max,
+            'grade_sent_max': grade_sent_max,
             'grade_sent_avg': grade_avg,
             'target_sentences_over_max': sentences_over,
             'target_pct_over_max': pct_over,
@@ -1660,8 +1809,13 @@ def analyze():
         if g in grade_vocab:
             cumulative_up_to_min_minus_1 |= grade_vocab[g]
     range_new = range_known - cumulative_up_to_min_minus_1
-    pct_suitable = round(len(range_known) / effective_total * 100, 1) if effective_total else 0
-    pct_new_in_range = round(len(range_new) / effective_total * 100, 1) if effective_total else 0
+    if grade_db_loaded:
+        pct_suitable = round(len(range_known) / effective_total * 100, 1) if effective_total else 0
+        pct_new_in_range = round(len(range_new) / effective_total * 100, 1) if effective_total else 0
+    else:
+        range_row = next((r for r in results if r['grade'] == int(grade_max)), results[-1] if results else {})
+        pct_suitable = float(range_row.get('comprehension_pct') or 0)
+        pct_new_in_range = round(max(0.0, 100.0 - pct_suitable), 1)
 
     first_readable = next((r for r in results if r['comprehension_pct'] >= 80), None)
     best_grade = first_readable['grade'] if first_readable else None
@@ -1693,6 +1847,24 @@ def analyze():
         'words': sorted(unknown_after_all)[:500],
     })
 
+    if grade_db_loaded:
+        all_grade_stems = set()
+        for words in grade_vocab.values():
+            all_grade_stems |= words
+        unknown_stems_after_all = all_stems - (all_grade_stems | confirmed_proper)
+    else:
+        fallback_surface_set = set(fallback_unknown_surfaces)
+        unknown_stems_after_all = {
+            stem for stem in all_stems
+            if stem_to_original.get(stem, stem) in fallback_surface_set
+        }
+    unknown_word_details = _unknown_word_details(
+        unknown_stems_after_all,
+        stem_to_original,
+        stem_freq,
+        fallback_grade=best_grade or fallback_estimated_grade or grade_max or 8,
+    )
+
     proper_noun_list = sorted([stem_to_original.get(s,s) for s in confirmed_proper])
 
     # Target book sentence stats
@@ -1703,19 +1875,15 @@ def analyze():
     paragraph_data = []
     for para in paragraphs[:50]:  # limit to 50 paragraphs
         para_stems = set(tokenize_tamil(para))
-        para_known = para_stems & range_known
-        para_pct = round(len(para_known) / len(para_stems) * 100, 1) if para_stems else 0
+        if grade_db_loaded:
+            para_known = para_stems & range_known
+            para_pct = round(len(para_known) / len(para_stems) * 100, 1) if para_stems else 0
+        else:
+            para_sent_counts = sentence_word_counts(para)
+            para_avg = sum(para_sent_counts) / len(para_sent_counts) if para_sent_counts else 0
+            length_penalty = max(0, para_avg - 8) * 3
+            para_pct = round(max(30.0, min(96.0, pct_suitable - length_penalty)), 1)
         paragraph_data.append({'text': para[:200] + '...' if len(para) > 200 else para, 'suitable_pct': para_pct})
-
-    # Run extended analytics (all free, local computation)
-    try:
-        conn2 = get_db()
-        raw_text_row = conn2.execute(
-            "SELECT raw_text FROM pending_extractions WHERE id = ?", (pending_id,)
-        ).fetchone()
-        conn2.close()
-        raw_text = raw_text_row['raw_text'] if raw_text_row and raw_text_row['raw_text'] else ''
-    except: raw_text = ''
 
     best_comp = next((r['comprehension_pct'] for r in results
                       if r['comprehension_pct'] >= 80), results[-1]['comprehension_pct'] if results else 0)
@@ -1727,6 +1895,23 @@ def analyze():
         sent_avg          = tss.get('avg', 0),
         sent_max_grade    = best_r.get('grade_sent_max', 0),
     )
+    try:
+        analytics_data['tamil_context'] = _corpus_readability.analyze_text(
+            raw_text,
+            corpus=_corpus_readability.load_corpus(),
+            stem_fn=get_stem,
+        )
+        analytics_data['morphology'] = analytics_data['tamil_context'].get('morphology')
+    except Exception as e:
+        analytics_data['tamil_context'] = {'enabled': False, 'error': str(e)}
+        analytics_data['morphology'] = {'enabled': False, 'error': str(e)}
+    try:
+        analytics_data['level_norms'] = _level_norms.analyze_text(
+            raw_text,
+            target_grade=best_grade or (best_r.get('grade') if best_r else None),
+        )
+    except Exception as e:
+        analytics_data['level_norms'] = {'enabled': False, 'error': str(e)}
 
     # Optional meaning-level analysis. Separate add-on layer; it does not change
     # existing readability scoring. It uses data/meaning_kb when built.
@@ -1803,6 +1988,8 @@ def analyze():
     return jsonify({
         'analysis_id': analysis_id,
         'book_name': book_name,
+        'grade_database_loaded': grade_db_loaded,
+        'analysis_basis': 'Loaded textbook grade vocabulary' if grade_db_loaded else 'Estimated fallback: TAVI/corpus, Tamil morphology, child-level signals, and sentence load',
         'total_words': total_words,
         'unique_words': unique_words,
         'unique_stems': unique_stems_cnt,
@@ -1817,6 +2004,7 @@ def analyze():
         'best_grade': best_grade,
         'target_sentence_stats': tss,
         'word_distribution': distribution,
+        'unknown_word_details': unknown_word_details,
         'analytics': analytics_data,
         'meaning': meaning_data,
         'suitability': suitability_data,
@@ -1831,6 +2019,49 @@ def meaning_status():
     if not kb:
         return jsonify({'built': False, 'message': 'Meaning knowledge base not built yet.'})
     return jsonify({'built': True, 'metadata': kb.get('metadata', {})})
+
+
+@app.route('/api/corpus/status')
+def corpus_status():
+    corpus = _corpus_readability.load_corpus()
+    if not corpus.get('built'):
+        return jsonify({'built': False, 'message': corpus.get('error') or 'Tamil corpus has not been built yet.'})
+    stats = corpus.get('stats', {})
+    return jsonify({
+        'built': True,
+        'documents': stats.get('documents', 0),
+        'tokens': stats.get('tokens', 0),
+        'unique_stems': stats.get('unique_stems', 0),
+        'sources': stats.get('sources', {}),
+        'wiki_db': stats.get('wiki_db', {}),
+        'bands': stats.get('bands', {}),
+    })
+
+
+@app.route('/api/corpus/build', methods=['POST'])
+def corpus_build():
+    try:
+        stats = _corpus_readability.build_corpus(REPO_ROOT, stem_fn=get_stem)
+        return jsonify({'ok': True, **stats})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@app.route('/api/norms/status')
+def norms_status():
+    try:
+        return jsonify(_level_norms.get_status())
+    except Exception as e:
+        return jsonify({'built': False, 'error': str(e)}), 500
+
+
+@app.route('/api/norms/build', methods=['POST'])
+def norms_build():
+    try:
+        stats = _level_norms.build_from_textbook_db(DB_PATH, extract_text_fn=extract_text, root=REPO_ROOT)
+        return jsonify({'ok': True, **stats})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
 
 @app.route('/api/meaning/build', methods=['POST'])
 def meaning_build_api():
@@ -2325,8 +2556,12 @@ def get_analysis(analysis_id):
     d['results'] = json.loads(d['results_json'])
     d['proper_noun_list'] = json.loads(d.get('proper_nouns') or '[]')
     d['sentence_data']    = json.loads(d.get('sentence_json') or '{}')
+    d['analytics']        = json.loads(d.get('analytics_json') or 'null') if 'analytics_json' in d else None
     d['meaning']          = json.loads(d.get('meaning_json') or 'null') if 'meaning_json' in d else None
     d['suitability']      = json.loads(d.get('suitability_json') or 'null') if 'suitability_json' in d else None
+    if d.get('results') and d.get('grade_database_loaded') is None:
+        d['grade_database_loaded'] = not bool(d['results'][0].get('estimated_only'))
+        d['analysis_basis'] = d['results'][0].get('basis') or ''
     del d['results_json']
     return jsonify(d)
 
@@ -2394,6 +2629,63 @@ def _word_distribution_from_results(results):
             'word_pct': last.get('new_pct', last.get('not_found_pct', round(len(words) / total * 100, 1) if total else 0)),
             'words': words,
         })
+    return rows
+
+def _sync_confirmed_word_to_analyzer(stem: str, grade_level: int) -> None:
+    """Make one teacher-approved library word available to readability scoring."""
+    stem = (stem or '').strip()
+    grade_level = int(grade_level or 0)
+    if not stem or grade_level < 1 or grade_level > 12:
+        return
+    conn = get_db()
+    conn.execute(
+        'INSERT OR IGNORE INTO grade_words (grade, word) VALUES (?, ?)',
+        (grade_level, stem)
+    )
+    conn.execute('''
+        INSERT INTO word_grade_map (stem, first_grade) VALUES (?, ?)
+        ON CONFLICT(stem) DO UPDATE
+          SET first_grade = MIN(first_grade, excluded.first_grade)
+    ''', (stem, grade_level))
+    conn.commit()
+    conn.close()
+
+def _unknown_word_details(
+    unknown_stems,
+    stem_to_original,
+    stem_freq,
+    *,
+    fallback_grade=None,
+    limit=500,
+):
+    """Build display rows for unknown words with the best available class estimate."""
+    stems = sorted(set(s for s in (unknown_stems or []) if s))
+    wiki_info = _wlib.lookup_wiki_words(stems, limit=limit)
+    rows = []
+    for stem in stems[:limit]:
+        info = wiki_info.get(stem) or {}
+        wiki_grade = info.get('inferred_grade')
+        if wiki_grade:
+            suggested_grade = int(wiki_grade)
+            source = 'wikipedia'
+            confidence = info.get('confidence')
+            reason = info.get('grade_reason') or 'Wikipedia corpus estimate'
+        else:
+            suggested_grade = int(fallback_grade or 8)
+            source = 'book_context'
+            confidence = 0.25
+            reason = 'Low-confidence estimate from this book level; teacher should confirm'
+        rows.append({
+            'stem': stem,
+            'word': stem_to_original.get(stem, stem),
+            'frequency': int(stem_freq.get(stem, 0) or 0),
+            'suggested_grade': max(1, min(12, suggested_grade)),
+            'source': source,
+            'confidence': confidence,
+            'reason': reason,
+            'wiki_frequency': info.get('frequency'),
+        })
+    rows.sort(key=lambda r: (-r['frequency'], r['suggested_grade'], r['word']))
     return rows
 
 @app.route('/api/review/<int:analysis_id>')
@@ -2545,6 +2837,9 @@ READING_PASSAGES = {
         'நான் பள்ளிக்கு செல்கிறேன். என் நண்பர்கள் என்னை எதிர்பார்க்கிறார்கள். நாங்கள் விளையாடுவோம்.',
         'சூரியன் பிரகாசமாக ஒளிர்கிறது. மேகங்கள் வெள்ளையாக இருக்கின்றன. காற்று மென்மையாக வீசுகிறது.',
         'என் வீட்டில் நாய் ஒன்று இருக்கிறது. அதன் பெயர் ராம். அது என்னை மிகவும் விரும்புகிறது.',
+        'என் பை நீல நிறத்தில் உள்ளது. அதில் புத்தகம், பென்சில், பலகை இருக்கின்றன. நான் அவற்றை கவனமாக வைத்திருக்கிறேன்.',
+        'மலர் சிவப்பாக மலர்கிறது. தேனீ அதில் அமர்கிறது. குழந்தைகள் மலரை பார்த்து மகிழ்கிறார்கள்.',
+        'நாங்கள் காலை உணவு சாப்பிட்டோம். பிறகு பள்ளிக்கு சென்றோம். ஆசிரியர் புதிய பாடம் சொல்லித் தந்தார்.',
     ],
     2: [
         'குழந்தைகள் பள்ளிக்கு சென்றனர். ஆசிரியர் நல்ல கதையைப் படித்தார். அனைவரும் கவனமாக கேட்டனர்.',
@@ -2552,6 +2847,9 @@ READING_PASSAGES = {
         'எங்கள் வகுப்பில் பத்து மாணவர்கள் இருக்கிறார்கள். அனைவரும் நண்பர்கள். நாங்கள் ஒருவருக்கொருவர் உதவுகிறோம்.',
         'பறவைகள் காலையில் பாடுகின்றன. அவை மரங்களில் அமர்ந்திருக்கின்றன. அவற்றின் இனிமையான குரல் கேட்கிறது.',
         'நான் பழம் சாப்பிடுகிறேன். அது ருசியாக இருக்கிறது. என் அம்மா அதை வாங்கிக் கொடுத்தார்.',
+        'எங்கள் பள்ளியில் பெரிய விளையாட்டு மைதானம் உள்ளது. இடைவேளையில் நாங்கள் ஓடி விளையாடுகிறோம். விளையாட்டு உடலை வலிமையாக்கும்.',
+        'அம்மா தோட்டத்தில் செடிக்கு தண்ணீர் ஊற்றினார். நான் சிறிய குடுவையை பிடித்தேன். செடி மெதுவாக வளர்கிறது.',
+        'தாத்தா எனக்கு ஒரு கதை சொன்னார். கதையில் நல்ல நண்பன் இருந்தான். நான் அந்த கதையை மீண்டும் சொல்லிப் பார்த்தேன்.',
     ],
     3: [
         'எங்கள் ஊரில் அழகான பூங்கா உள்ளது. அங்கு குழந்தைகள் மாலை நேரத்தில் விளையாடுகிறார்கள். மரங்களும் மலர்களும் அந்த இடத்தை அழகாக்குகின்றன.',
@@ -2559,6 +2857,9 @@ READING_PASSAGES = {
         'நான் என் சகோதரியுடன் விளையாடுகிறேன். அவள் என்னை விரும்புகிறாள். நாங்கள் ஒருவருக்கொருவர் உதவுகிறோம்.',
         'மரங்கள் நமக்கு ஆக்ஸிஜனை தருகின்றன. அவை நமது சுற்றுச்சூழலை பாதுகாக்கின்றன. ஆகவே மரங்களை வெட்டாமல் பாதுகாக்க வேண்டும்.',
         'பள்ளியில் நாங்கள் பாடம் கற்கிறோம். ஆசிரியர் எங்களுக்கு சொல்லிக் கொடுக்கிறார். நாங்கள் கவனமாகக் கேட்கிறோம்.',
+        'கடைக்குச் சென்ற போது பல வகை பழங்களை பார்த்தேன். மாம்பழம், வாழைப்பழம், மாதுளை எல்லாம் இருந்தன. வீட்டிற்கு வாழைப்பழம் வாங்கி வந்தோம்.',
+        'என் நண்பன் இன்று பள்ளிக்கு வரவில்லை. அவன் உடம்பு சரியில்லை என்று ஆசிரியர் கூறினார். பள்ளி முடிந்ததும் அவனைப் பார்க்க சென்றேன்.',
+        'காலைப்பொழுது தெரு அமைதியாக இருந்தது. பால் விற்பவர் சைக்கிளில் வந்தார். மக்கள் தங்கள் நாளை மெதுவாகத் தொடங்கினர்.',
     ],
     4: [
         'நீர் நம் வாழ்விற்கு மிகவும் அவசியமானது. நாம் குடிக்கவும் சமைக்கவும் விவசாயம் செய்யவும் நீரைப் பயன்படுத்துகிறோம். ஆகவே நீரை வீணாக்காமல் பாதுகாக்க வேண்டும்.',
@@ -2566,6 +2867,9 @@ READING_PASSAGES = {
         'விவசாயம் நம் நாட்டின் முதுகெலும்பு. விவசாயிகள் உழைத்து உணவை உற்பத்தி செய்கிறார்கள். நாம் அவர்களை மதிக்க வேண்டும்.',
         'கடல் நமக்கு பல பொருட்களை தருகிறது. மீன், உப்பு போன்றவை கடலில் இருந்து வருகின்றன. ஆகவே கடலை தூய்மையாக வைத்திருக்க வேண்டும்.',
         'பறவைகள் இயற்கையின் அழகு. அவை வெவ்வேறு வண்ணங்களில் இருக்கின்றன. அவற்றைப் பாதுகாப்பது நமது கடமை.',
+        'போக்குவரத்து விதிகளை நாம் கடைபிடிக்க வேண்டும். சாலையை கடக்கும் போது இருபுறமும் பார்க்க வேண்டும். கவனம் உயிரைக் காக்கும்.',
+        'எங்கள் வீட்டில் சிறிய சமையல் தோட்டம் உள்ளது. அதில் புதினா, மல்லி, தக்காளி வளர்கின்றன. பசுமையான காய்கறி உடலுக்கு நல்லது.',
+        'கைத்தொழில் பொருட்கள் நம் மரபை காட்டுகின்றன. கூடை, மண் பானை, மர பொம்மை போன்றவை அழகாக செய்யப்படுகின்றன. உழைப்பை மதிப்போம்.',
     ],
     5: [
         'சுற்றுச்சூழலைப் பாதுகாப்பது ஒவ்வொருவரின் கடமை. மரங்களை நடுதல், நீரைச் சேமித்தல், குப்பையை சரியான இடத்தில் போடுதல் போன்ற பழக்கங்கள் நம் ஊரை தூய்மையாக வைத்திருக்கும்.',
@@ -2573,6 +2877,9 @@ READING_PASSAGES = {
         'நண்பர்களுடன் இருப்பது மகிழ்ச்சியை தருகிறது. நாம் ஒருவருக்கொருவர் உதவ வேண்டும். நல்ல நண்பர்கள் வாழ்க்கையை அழகாக்குகிறார்கள்.',
         'புத்தகங்கள் நமக்கு அறிவை தருகின்றன. அவற்றைப் படிப்பதால் புதிய விஷயங்களை கற்கலாம். நூலகம் சென்று புத்தகங்கள் படியுங்கள்.',
         'விளையாட்டு நமது உடலை ஆரோக்கியமாக வைத்திருக்கிறது. அது மனதை மகிழ்ச்சியாக்குகிறது. தினமும் விளையாட்டு செய்யுங்கள்.',
+        'நேரத்தை மதிப்பது நல்ல பழக்கம். வேலைகளை சரியான நேரத்தில் செய்தால் மனம் அமைதியாக இருக்கும். திட்டமிட்டு செயல்படுவது வெற்றிக்கு உதவும்.',
+        'குடும்பத்தில் அனைவரும் சேர்ந்து பேசுவது மகிழ்ச்சியை அதிகரிக்கும். பெரியவர்கள் அனுபவத்தை பகிர்ந்தால் குழந்தைகள் கற்றுக்கொள்வார்கள். அன்பு குடும்பத்தை இணைக்கிறது.',
+        'சிறிய சேமிப்பு பெரிய உதவியாக மாறும். தேவையற்ற செலவை குறைத்தால் பணத்தை பயனுள்ள காரியங்களுக்கு பயன்படுத்தலாம். சேமிப்பு பொறுப்புணர்வை வளர்க்கும்.',
     ],
     6: [
         'தமிழ் மொழி பழமையான செம்மொழிகளில் ஒன்றாகும். அதன் இலக்கியங்கள் மனித வாழ்க்கை, இயற்கை, அறம், அறிவு ஆகியவற்றைப் பற்றி அழகாக எடுத்துரைக்கின்றன.',
@@ -2580,6 +2887,9 @@ READING_PASSAGES = {
         'வள்ளுவர் தமிழ் இலக்கியத்தின் மிகப் பெரிய கவிஞர். அவர் திருக்குறளை எழுதினார். அதில் அறம், பொருள், இன்பம் பற்றி சொல்லப்பட்டுள்ளது.',
         'தமிழ் சினிமா உலகம் மிகவும் பிரபலமானது. அதில் நல்ல கதைகள், நடனம், இசை இருக்கின்றன. மக்கள் அதை ரசிக்கிறார்கள்.',
         'தமிழ் பண்டிகைகள் மிகவும் வண்ணமயமானவை. பொங்கல், தீபாவளி போன்றவை மகிழ்ச்சியை தருகின்றன. அவற்றை கொண்டாடுவது மரபு.',
+        'கிராம வாழ்க்கையில் இயற்கைக்கு அருகில் வாழும் அனுபவம் கிடைக்கிறது. வயல்கள், குளங்கள், மரங்கள் அன்றாட வாழ்வின் பகுதிகளாக இருக்கின்றன. நகர வாழ்க்கையிலும் அந்த பசுமையை காக்க வேண்டும்.',
+        'அஞ்சல் நிலையம் மக்கள் தகவல் பரிமாற்றத்திற்கு உதவியது. கடிதங்கள் மூலம் செய்திகள் தொலைதூரம் சென்றன. இன்று தொழில்நுட்பம் வளர்ந்தாலும் கடிதத்தின் மதிப்பு தனித்துவமானது.',
+        'மழைக்காலம் விவசாயிகளுக்கு நம்பிக்கையை தருகிறது. நல்ல மழை பெய்தால் பயிர்கள் செழித்து வளரும். மழைநீரை சேமிப்பது அனைவருக்கும் பயன் தரும்.',
     ],
     7: [
         'அறிவியல் சிந்தனை மனிதனுக்கு காரணத்தை ஆராயும் திறனை அளிக்கிறது. ஒரு நிகழ்வு ஏன் நடக்கிறது என்பதை கேள்வி கேட்டு ஆராயும்போது புதிய கண்டுபிடிப்புகள் உருவாகின்றன.',
@@ -2587,6 +2897,9 @@ READING_PASSAGES = {
         'மின்சாரம் நமது வாழ்க்கையை எளிதாக்குகிறது. அது விளக்கு, விசிறி போன்றவற்றை இயக்குகிறது. ஆனால் அதை சரியாக பயன்படுத்த வேண்டும்.',
         'நீர் மூன்று நிலைகளில் இருக்கிறது. திடம், திரவம், வாயு. வெப்பம் அதை மாற்றுகிறது.',
         'தாவரங்கள் சூரிய ஒளியை உணவாக மாற்றுகின்றன. இது புகைப்பட செயல் என்று அழைக்கப்படுகிறது. இது பூமியில் உயிர் வாழ்வுக்கு அவசியம்.',
+        'காந்தம் சில உலோகங்களை தன் பக்கம் இழுக்கும். இந்த தன்மை பல கருவிகளில் பயன்படுகிறது. அறிவியல் பாடத்தில் இதை சோதனை செய்து பார்க்கலாம்.',
+        'உடற்பயிற்சி உடலின் இயக்கத்தை சீராக்குகிறது. நுரையீரல், இதயம், தசைகள் எல்லாம் நன்றாக இயங்க உதவுகிறது. தினசரி நடைபயிற்சி ஒரு நல்ல தொடக்கம்.',
+        'தகவலை சரிபார்த்து அறிதல் முக்கியமான திறன். ஒருவர் சொன்னதைக் கேட்டு உடனே நம்பாமல் ஆதாரத்தை பார்க்க வேண்டும். இதுவே அறிவியல் மனப்பான்மை.',
     ],
     8: [
         'சமூகத்தில் ஒற்றுமை நிலைக்க வேண்டுமெனில் அனைவரும் ஒருவரை ஒருவர் மதிக்க வேண்டும். மொழி, மதம், பழக்கம் ஆகிய வேறுபாடுகள் இருந்தாலும் மனித நேயம் பொதுவான மதிப்பாக இருக்க வேண்டும்.',
@@ -2594,6 +2907,9 @@ READING_PASSAGES = {
         'ஒழுக்கம் மனித வாழ்க்கையின் அடிப்படை. நேர்மை, உண்மை போன்றவை ஒழுக்கத்தின் பகுதிகள். ஒழுக்கமான மனிதன் அனைவராலும் மதிக்கப்படுகிறான்.',
         'சமூக சேவை மிகவும் முக்கியம். ஏழைகளுக்கு உதவுதல், சுற்றுச்சூழலை சுத்தம் செய்தல் போன்றவை சமூக சேவை. இது மனதுக்கு திருப்தியை தருகிறது.',
         'நாட்டு மக்கள் ஒற்றுமையாக இருக்க வேண்டும். அப்போதுதான் வளர்ச்சி ஏற்படும். பிரிவினை நாட்டை பலவீனப்படுத்தும்.',
+        'பொது இடங்களை பாதுகாப்பது குடிமக்களின் பொறுப்பு. பேருந்து நிலையம், பூங்கா, நூலகம் போன்ற இடங்களை தூய்மையாக வைத்தால் அனைவரும் பயன்படுத்த முடியும்.',
+        'மொழி ஒரு சமூகத்தின் நினைவகமாக செயல்படுகிறது. பழமொழி, பாடல், கதை ஆகியவற்றில் மக்களின் அனுபவங்கள் மறைந்து கிடக்கின்றன. அவற்றை படிப்பது பண்பாட்டை அறிய உதவும்.',
+        'சிறந்த தலைமை என்பது கட்டளையிடுவதில் மட்டும் இல்லை. மற்றவர்களின் கருத்தைக் கேட்டு சரியான முடிவை எடுப்பதும் தலைமைத் திறன். ஒத்துழைப்பு நல்ல முடிவை தரும்.',
     ],
     9: [
         'வரலாற்றைப் படிப்பது கடந்த கால நிகழ்வுகளை அறிதலுக்கு மட்டுமல்ல; தற்போதைய சமூக மாற்றங்களைப் புரிந்துகொள்வதற்கும் உதவுகிறது. மக்கள் எடுத்த முடிவுகள் எதிர்காலத்தை எவ்வாறு பாதித்தன என்பதையும் அது காட்டுகிறது.',
@@ -2601,6 +2917,9 @@ READING_PASSAGES = {
         'சுதந்திர போர் இந்தியாவின் வரலாற்றில் முக்கியமானது. மகாத்மா காந்தி அதை வழிநடத்தினார். அது அகிம்சை முறையில் நடந்தது.',
         'தொழில்நுட்பம் வாழ்க்கையை மாற்றியுள்ளது. கணினி, இணையம் புதிய வாய்ப்புகளை தந்துள்ளன. ஆனால் அதை தவறாக பயன்படுத்தக்கூடாது.',
         'சமூக மாற்றம் தேவை. பழைய மரபுகளை கைவிட்டு புதியவற்றை ஏற்றுக்கொள்ள வேண்டும். இது வளர்ச்சிக்கு உதவும்.',
+        'பழைய கல்வெட்டுகள் வரலாற்றுக்கு முக்கிய ஆதாரங்களாக உள்ளன. அவற்றில் அரசர்கள், கொடைகள், சமூகம் பற்றிய செய்திகள் காணப்படுகின்றன. ஆதாரங்களை ஆராய்வதே வரலாற்று படிப்பின் அடிப்படை.',
+        'நகர வளர்ச்சி பல வசதிகளை உருவாக்குகிறது. அதே நேரத்தில் போக்குவரத்து நெரிசல், குப்பை மேலாண்மை போன்ற சவால்களையும் உருவாக்குகிறது. திட்டமிடல் அவசியம்.',
+        'மீடியா மக்கள் கருத்தை உருவாக்கும் ஆற்றல் கொண்டது. செய்தியை வாசிக்கும் போது அதன் நம்பகத்தன்மையை ஆராய வேண்டும். பொறுப்பான வாசிப்பு நல்ல குடிமக்களை உருவாக்கும்.',
     ],
     10: [
         'தொழில்நுட்ப வளர்ச்சி கல்வி முறையில் பல மாற்றங்களை ஏற்படுத்தியுள்ளது. இணையம் மூலம் மாணவர்கள் பல்வேறு அறிவு வளங்களை அணுக முடிகிறது. ஆனால் தகவலை சிந்தித்து தேர்ந்தெடுக்கும் திறனும் அவசியம்.',
@@ -2608,6 +2927,9 @@ READING_PASSAGES = {
         'கணினி நமது வேலையை எளிதாக்குகிறது. அதில் பல மென்பொருட்கள் இருக்கின்றன. அவற்றை கற்றுக்கொள்ள வேண்டும்.',
         'அறிவியல் கண்டுபிடிப்புகள் வாழ்க்கையை மேம்படுத்துகின்றன. மருத்துவம், விண்வெளி ஆய்வு போன்றவை அதன் எடுத்துக்காட்டுகள்.',
         'சமூக ஊடகங்கள் தகவலை விரைவாக பரப்புகின்றன. ஆனால் அதை நேர்மையாக பயன்படுத்த வேண்டும்.',
+        'தரவு பாதுகாப்பு இன்றைய உலகில் மிக முக்கியமானது. கடவுச்சொற்களை பகிராமல் இருப்பதும் தெரியாத இணைப்புகளை திறக்காமல் இருப்பதும் பாதுகாப்பை அதிகரிக்கும்.',
+        'பசுமை ஆற்றல் எதிர்கால தேவையாக வளர்கிறது. சூரிய ஒளி, காற்று, நீர் போன்ற இயற்கை வளங்களை பயன்படுத்தி மின்சாரம் உருவாக்கலாம். இது சுற்றுச்சூழலுக்கு உதவும்.',
+        'ஒரு பிரச்சனையை தீர்க்க முதலில் அதன் காரணத்தை புரிந்து கொள்ள வேண்டும். பின்னர் பல வழிகளை ஒப்பிட்டு சிறந்த தீர்வை தேர்ந்தெடுக்க வேண்டும். இது நல்ல சிந்தனை முறை.',
     ],
     11: [
         'இலக்கியப் படைப்புகள் சமூகத்தின் உணர்வுகளையும் முரண்பாடுகளையும் வெளிப்படுத்தும் ஆற்றல் கொண்டவை. ஒரு சிறந்த படைப்பு வாசகரை சிந்திக்கவும் தன் அனுபவத்தை மறுபரிசீலனை செய்யவும் தூண்டும்.',
@@ -2615,6 +2937,9 @@ READING_PASSAGES = {
         'புத்தகங்கள் வாசிப்பு மனதை வளர்க்கிறது. அது புதிய எண்ணங்களை தருகிறது. நல்ல புத்தகங்களை தேர்ந்தெடுக்க வேண்டும்.',
         'எழுத்தாளர்கள் சமூகத்தை பிரதிபலிக்கிறார்கள். அவர்கள் கதைகளில் உண்மையை சொல்கிறார்கள். அது மாற்றத்தை தூண்டும்.',
         'கலை வாழ்க்கையை அழகாக்குகிறது. இசை, நடனம், ஓவியம் போன்றவை கலை வடிவங்கள். அவற்றை வளர்க்க வேண்டும்.',
+        'கவிதை குறைந்த சொற்களில் ஆழமான அனுபவத்தை வெளிப்படுத்தும். ஓசை, உருவகம், உணர்ச்சி ஆகியவை சேர்ந்து வாசகரின் மனதில் புதிய படிமத்தை உருவாக்குகின்றன.',
+        'சுயசரிதை ஒரு மனிதனின் வாழ்க்கையை அவனது பார்வையில் பதிவு செய்கிறது. அதில் வெற்றி மட்டும் அல்ல, தோல்வி, போராட்டம், மாற்றம் ஆகியவையும் இடம்பெறும்.',
+        'சமூக ஆய்வு நம்மை சுற்றியுள்ள வாழ்வை புரிந்துகொள்ள உதவுகிறது. பழக்கம், தொழில், குடும்ப அமைப்பு போன்றவை காலத்தோடு மாறுகின்றன. அவற்றை கவனிப்பது அறிவை விரிவாக்கும்.',
     ],
     12: [
         'மனித முன்னேற்றம் அறிவு, பொறுப்பு, கருணை ஆகிய மூன்றின் சமநிலையால் நிலைபெறும். அறிவியல் புதிய வாய்ப்புகளைத் திறந்தாலும், அவற்றை அறநெறியுடன் பயன்படுத்தும் சமூகப் பொறுப்பு அவசியமானது.',
@@ -2622,37 +2947,203 @@ READING_PASSAGES = {
         'அறநெறி வாழ்க்கையின் அடிப்படை. நேர்மை, நியாயம் போன்றவை அறநெறி. அதை கடைபிடிக்க வேண்டும்.',
         'தலைமை திறன் முக்கியம். ஒரு தலைவன் மக்களை வழிநடத்த வேண்டும். அது பொறுப்பு.',
         'எதிர்காலம் நமது செயல்களால் உருவாகிறது. நல்ல செயல்கள் நல்ல எதிர்காலத்தை தரும்.',
+        'நிலையான வளர்ச்சி பொருளாதார முன்னேற்றத்தையும் சுற்றுச்சூழல் பொறுப்பையும் இணைக்க முயல்கிறது. இன்றைய தேவைகளை நிறைவேற்றும் போது எதிர்கால தலைமுறையின் உரிமைகளையும் காக்க வேண்டும்.',
+        'மனித உரிமைகள் அனைவருக்கும் சமமான மரியாதையை வலியுறுத்துகின்றன. பிறப்பு, மொழி, பொருளாதார நிலை போன்ற வேறுபாடுகள் அடிப்படை உரிமைகளை குறைக்கக் கூடாது.',
+        'ஆராய்ச்சி மனப்பான்மை கேள்வி கேட்கும் துணிவில் தொடங்குகிறது. கிடைக்கும் தகவலை ஆய்ந்து, ஆதாரத்தை மதித்து, தெளிவான முடிவுக்கு வருவது அறிவின் பொறுப்பான பயணம்.',
     ],
 }
 
-def _reading_passage_for_grade(grade, source='default'):
+_READING_EXTRA_TOPICS = {
+    1: ['பள்ளி', 'வீடு', 'மரம்', 'மலர்', 'பந்து', 'பால்', 'பழம்', 'பூனை', 'நாய்', 'மழை', 'சூரியன்', 'நண்பன்', 'புத்தகம்', 'பென்சில்', 'பறவை', 'தோட்டம்', 'கதை'],
+    2: ['வகுப்பு', 'ஆசிரியர்', 'தோழி', 'குடும்பம்', 'காலை உணவு', 'விளையாட்டு', 'நூல்', 'சிறு தோட்டம்', 'பேருந்து', 'மழை நாள்', 'வண்ண மலர்', 'கடைக்குச் செல்லுதல்', 'பள்ளி மணி', 'நல்ல பழக்கம்', 'குடிநீர்', 'விடுமுறை', 'கதை நேரம்'],
+    3: ['பூங்கா', 'நூலகம்', 'காய்கறி சந்தை', 'கிராமம்', 'காலை நடை', 'சிறு சேமிப்பு', 'மரக்கன்று', 'பள்ளி விழா', 'கைவினை', 'மீன் குளம்', 'நண்பர்களின் உதவி', 'வீட்டு தோட்டம்', 'சுத்தம்', 'மழைநீர்', 'பயணம்', 'குடும்ப உரையாடல்', 'வாசிப்பு பழக்கம்'],
+    4: ['நீர் சேமிப்பு', 'சாலை பாதுகாப்பு', 'நூலகப் பயன்', 'விவசாயம்', 'கடல் வளம்', 'சுற்றுச்சூழல்', 'உடற்பயிற்சி', 'சமையல் தோட்டம்', 'பொது இடம்', 'கைத்தொழில்', 'பறவைகள்', 'குடும்ப பொறுப்பு', 'சுத்தமான தெரு', 'மின்சார சேமிப்பு', 'மரபு உணவு', 'குழு வேலை', 'நேர்மை'],
+    5: ['நேர மேலாண்மை', 'ஆரோக்கிய உணவு', 'நண்பர்கள்', 'சிறு சேமிப்பு', 'நூலகம்', 'விளையாட்டு', 'சுற்றுச்சூழல்', 'குடும்ப அன்பு', 'தூய்மை', 'மரக்கன்று நடுதல்', 'பொறுப்பு', 'குழு முயற்சி', 'தண்ணீர் பாதுகாப்பு', 'இசை', 'கதை வாசிப்பு', 'தன்னம்பிக்கை', 'உதவி மனம்'],
+    6: ['தமிழ் மொழி', 'கிராம வாழ்க்கை', 'மழைநீர் சேமிப்பு', 'அஞ்சல் நிலையம்', 'திருக்குறள்', 'பண்டிகை', 'நகரமும் கிராமமும்', 'வாசிப்பு திறன்', 'இயற்கை வளம்', 'சிறு தொழில்', 'மரபு விளையாட்டு', 'பள்ளி அறிவியல் நாள்', 'பண்பாடு', 'உழைப்பு', 'பாதுகாப்பான பயணம்', 'கலை நிகழ்ச்சி', 'சமூக ஒற்றுமை'],
+    7: ['அறிவியல் சிந்தனை', 'மின்சாரம்', 'நீரின் நிலைகள்', 'தாவர உணவு தயாரித்தல்', 'காந்தம்', 'உடற்பயிற்சி', 'தகவல் சரிபார்ப்பு', 'வானிலை', 'சூரிய குடும்பம்', 'சுகாதாரம்', 'சிறு ஆய்வு', 'பசுமை பள்ளி', 'கழிவு பிரித்தல்', 'அளவீடு', 'ஆற்றல் சேமிப்பு', 'நீர்ச்சுழற்சி', 'கூட்டு முயற்சி'],
+    8: ['சமூக ஒற்றுமை', 'பொது இட பாதுகாப்பு', 'மொழி மற்றும் பண்பாடு', 'தலைமைத் திறன்', 'சமூக சேவை', 'ஒழுக்கம்', 'கல்வியின் பயன்', 'மனித நேயம்', 'சமத்துவம்', 'ஊடக பொறுப்பு', 'சுற்றுச்சூழல் செயல்', 'உள்ளூர் நிர்வாகம்', 'நூலக இயக்கம்', 'தன்னார்வம்', 'வாக்குரிமை', 'பொது வளம்', 'கருத்து வேறுபாடு'],
+    9: ['வரலாற்று ஆதாரம்', 'நகர வளர்ச்சி', 'மீடியா வாசிப்பு', 'சுதந்திரப் போராட்டம்', 'கல்வெட்டு', 'சமூக மாற்றம்', 'தொழில்நுட்பப் பயன்பாடு', 'பழைய மரபு', 'குடிமைப் பொறுப்பு', 'பொருளாதார மாற்றம்', 'பசுமை நகரம்', 'செய்தி நம்பகத்தன்மை', 'நாட்டுப்புற கலை', 'பயணக் குறிப்புகள்', 'ஆவண ஆய்வு', 'மக்கள் இயக்கம்', 'நீர் மேலாண்மை'],
+    10: ['தரவு பாதுகாப்பு', 'பசுமை ஆற்றல்', 'பிரச்சனை தீர்வு', 'இணையப் பயன்பாடு', 'அறிவியல் கண்டுபிடிப்பு', 'சமூக ஊடகம்', 'தொழில்நுட்ப கல்வி', 'சுற்றுச்சூழல் திட்டம்', 'தொழில் திறன்', 'நேர்காணல் திறன்', 'ஆய்வு மனப்பான்மை', 'கணினி ஒழுக்கம்', 'மின்கல்வி', 'புதுமை', 'தகவல் தேர்வு', 'காலநிலை மாற்றம்', 'பொறுப்பான தொடர்பு'],
+    11: ['கவிதை அனுபவம்', 'சுயசரிதை', 'சமூக ஆய்வு', 'இலக்கியப் பார்வை', 'கதை வடிவம்', 'கலை விமர்சனம்', 'வாசகர் அனுபவம்', 'மொழி நடை', 'நாடக மேடை', 'சிந்தனை கட்டுரை', 'புனைகதை', 'உருவகம்', 'பண்பாட்டு பதிவு', 'ஆசிரியர் நோக்கம்', 'சமூக முரண்பாடு', 'நினைவுகள்', 'படைப்பு வாசிப்பு'],
+    12: ['நிலையான வளர்ச்சி', 'மனித உரிமைகள்', 'ஆராய்ச்சி மனப்பான்மை', 'அறநெறி', 'சமூகப் பொறுப்பு', 'உலகளாவிய சவால்', 'தலைமை', 'அறிவும் கருணையும்', 'பொது கொள்கை', 'சுற்றுச்சூழல் நீதி', 'தகவல் நெறிமுறை', 'சமநிலை வளர்ச்சி', 'பொருளாதார பொறுப்பு', 'விமர்சன சிந்தனை', 'குடிமைப் பங்கேற்பு', 'எதிர்காலத் திட்டம்', 'மனித முன்னேற்றம்'],
+}
+
+def _make_extra_reading_passage(grade, topic, index):
+    if grade <= 2:
+        return f'{topic} பற்றி இன்று பேசினோம். நான் கவனமாக கேட்டேன். பிறகு இரண்டு வாக்கியங்களை தெளிவாக வாசித்தேன்.'
+    if grade <= 5:
+        return f'{topic} நம் அன்றாட வாழ்க்கையில் முக்கியமானது. இதைப் பற்றி ஆசிரியர் எளிய எடுத்துக்காட்டுகளுடன் விளக்கினார். நாங்கள் கேள்விகளுக்கு பதில் சொல்லிப் பழகினோம்.'
+    if grade <= 8:
+        return f'{topic} குறித்து வகுப்பில் சிறிய உரையாடல் நடந்தது. மாணவர்கள் தங்கள் அனுபவங்களை பகிர்ந்தனர். கருத்துகளை ஒழுங்காக கேட்டு புரிந்துகொள்ளும் பழக்கம் வாசிப்புத் திறனை வளர்க்கிறது.'
+    if grade <= 10:
+        return f'{topic} பற்றிய தகவலை படிக்கும் போது காரணம், விளைவு, ஆதாரம் ஆகியவற்றை கவனிக்க வேண்டும். ஒரு கருத்தை உடனே ஏற்காமல் சிந்தித்து பார்க்கும் திறன் மாணவர்களுக்கு தெளிவான புரிதலை தருகிறது.'
+    return f'{topic} என்பது தனிப்பட்ட புரிதலை மட்டுமல்ல, சமூகப் பொறுப்பையும் நினைவுபடுத்தும் கருத்தாகும். ஆதாரங்களை ஆய்ந்து, பல கோணங்களில் சிந்தித்து, தெளிவான முடிவை உருவாக்குவது முதிர்ந்த வாசிப்பின் அடையாளமாகும்.'
+
+for _grade, _topics in _READING_EXTRA_TOPICS.items():
+    _existing = set(READING_PASSAGES.get(_grade, []))
+    for _idx, _topic in enumerate(_topics, start=1):
+        _passage = _make_extra_reading_passage(_grade, _topic, _idx)
+        if _passage not in _existing:
+            READING_PASSAGES[_grade].append(_passage)
+            _existing.add(_passage)
+    READING_PASSAGES[_grade] = READING_PASSAGES[_grade][:25]
+
+def _infer_grade_from_path(path):
+    parts = os.path.normpath(path).split(os.sep)
+    for part in parts:
+        m = re.search(r'(?:class|grade|std)[_\-\s]*(\d{1,2})', part, re.I)
+        if m:
+            grade = int(m.group(1))
+            if 1 <= grade <= 12:
+                return grade
+        m = re.fullmatch(r'(\d{1,2})', part)
+        if m:
+            grade = int(m.group(1))
+            if 1 <= grade <= 12:
+                return grade
+    return None
+
+def _reading_chunks_from_text(text, grade):
+    """Build child-readable reading practice chunks from extracted textbook text."""
+    text = _fix_common_tamil_ocr_errors(text or '')
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    paragraphs = [p.strip() for p in re.split(r'\n\s*\n+', text) if p.strip()]
+
+    chunks = []
+    for para in paragraphs:
+        wc = len(_reading_score.tamil_words(para))
+        if 12 <= wc <= 90:
+            chunks.append(re.sub(r'\s+', ' ', para))
+        elif wc > 90:
+            words = tokenize_tamil(para)
+            size = 35 if grade <= 2 else 50 if grade <= 5 else 70
+            for i in range(0, len(words), size):
+                part = words[i:i + size]
+                if len(part) >= 12:
+                    chunks.append(' '.join(part))
+
+    # OCR text files are often one token per line; turn those into practice passages.
+    if not chunks and lines:
+        words = tokenize_tamil(' '.join(lines))
+        size = 28 if grade <= 2 else 45 if grade <= 5 else 65
+        for i in range(0, len(words), size):
+            part = words[i:i + size]
+            if len(part) >= 10:
+                chunks.append(' '.join(part))
+
+    return chunks
+
+def _choose_reading_item(items, avoid_text=''):
+    if not items:
+        return None
+    avoid_norm = re.sub(r'\s+', ' ', avoid_text or '').strip()
+    if avoid_norm and len(items) > 1:
+        filtered = []
+        for item in items:
+            text = item.get('text') if isinstance(item, dict) else str(item)
+            if re.sub(r'\s+', ' ', text or '').strip() != avoid_norm:
+                filtered.append(item)
+        if filtered:
+            items = filtered
+    return random.choice(items)
+
+def _reading_chunk_quality(chunk):
+    words = tokenize_tamil(chunk)
+    if len(words) < 10:
+        return 0
+    suspicious = 0
+    very_short = 0
+    broken_short = 0
+    for word in words:
+        if len(word) <= 2:
+            very_short += 1
+        if len(word) <= 3 and (word.endswith('்') or re.search(r'([\u0B80-\u0BFF])\1', word)):
+            broken_short += 1
+        if re.search(r'[நவபமகத]நா|[வபம]ெ|லை|ைல|ைை|ன்ை|கிை|நக|நள|நாடு|நார்|யநாக|லய$|[ஜஷஸஹ]|(.)\1\1', word):
+            suspicious += 1
+    suspicious_ratio = suspicious / max(len(words), 1)
+    short_ratio = very_short / max(len(words), 1)
+    broken_short_ratio = broken_short / max(len(words), 1)
+    if suspicious_ratio > 0.18 or short_ratio > 0.28 or broken_short_ratio > 0.05:
+        return 0
+    return max(1, 100 - int((suspicious_ratio + short_ratio + broken_short_ratio) * 100))
+
+def _textbook_reading_passage_for_grade(grade, avoid_text=''):
+    base = 'textbooks_imported_text'
+    if not os.path.isdir(base):
+        return None
+
+    candidates = []
+    for root, _, files in os.walk(base):
+        for name in files:
+            if not name.lower().endswith('.txt'):
+                continue
+            path = os.path.join(root, name)
+            if _infer_grade_from_path(path) != grade:
+                continue
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    text = f.read()
+            except UnicodeDecodeError:
+                with open(path, 'r', encoding='utf-16') as f:
+                    text = f.read()
+            except Exception:
+                continue
+            rel = os.path.relpath(path, base)
+            for chunk in _reading_chunks_from_text(text, grade):
+                quality = _reading_chunk_quality(chunk)
+                if quality:
+                    candidates.append({'text': chunk, 'source': 'textbook', 'source_detail': rel, 'quality': quality})
+
+    if candidates:
+        best_quality = max(c.get('quality', 0) for c in candidates)
+        pool = [c for c in candidates if c.get('quality', 0) >= max(1, best_quality - 20)]
+        passage = _choose_reading_item(pool or candidates, avoid_text) or random.choice(candidates)
+        passage.pop('quality', None)
+        return passage
+    return None
+
+def _default_reading_passage_for_grade(grade, avoid_text=''):
+    items = READING_PASSAGES.get(grade) or READING_PASSAGES[12]
+    text = _choose_reading_item(items, avoid_text) or items[0]
+    return {'text': text, 'source': 'default', 'source_detail': 'built-in practice passage'}
+
+def _reading_passage_for_grade(grade, source='textbook', avoid_text=''):
     grade = max(1, min(12, int(grade or 1)))
     if source == 'default':
-        items = READING_PASSAGES.get(grade) or READING_PASSAGES[12]
-        if len(items) <= 1:
-            return items[0]
-        return random.choice(items)
-    else:
-        # Query database for passages from textbooks or children books
+        return _default_reading_passage_for_grade(grade, avoid_text)
+
+    if source in {'textbook', 'textbooks', 'extracted'}:
+        passage = _textbook_reading_passage_for_grade(grade, avoid_text)
+        if passage:
+            return passage
+
+    # Query database for passages from textbooks or children books.
+    if source not in {'textbook', 'textbooks', 'extracted'}:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         cursor.execute("SELECT text FROM reading_passages WHERE grade = ? AND source = ? ORDER BY RANDOM() LIMIT 1", (grade, source))
         row = cursor.fetchone()
         conn.close()
         if row:
-            return row[0]
-        # Fallback to default if no passages found
-        items = READING_PASSAGES.get(grade) or READING_PASSAGES[12]
-        if len(items) <= 1:
-            return items[0]
-        return random.choice(items)
+            return {'text': row[0], 'source': source, 'source_detail': 'saved reading passage'}
+
+    return _default_reading_passage_for_grade(grade, avoid_text)
 
 @app.route('/api/reading/passage')
 def reading_passage():
     grade = int(request.args.get('grade') or 1)
-    source = request.args.get('source') or 'default'
-    text = _reading_passage_for_grade(grade, source)
-    return jsonify({'grade': grade, 'source': source, 'text': text, 'word_count': len(_reading_score.tamil_words(text))})
+    source = request.args.get('source') or 'textbook'
+    avoid_text = request.args.get('last_text') or ''
+    passage = _reading_passage_for_grade(grade, source, avoid_text)
+    text = passage['text']
+    return jsonify({
+        'grade': grade,
+        'source': passage.get('source', source),
+        'source_detail': passage.get('source_detail', ''),
+        'text': text,
+        'word_count': len(_reading_score.tamil_words(text)),
+    })
 
 @app.route('/api/reading/asr_status')
 def reading_asr_status():
@@ -2794,6 +3285,243 @@ def delete_analysis(analysis_id):
 
 # ── Report generation ─────────────────────────────────────────────────────────
 
+def _generate_shaped_tamil_report_pdf(row, results, distribution, proper_nouns, sent_data, meaning=None):
+    """Render the PDF report through MuPDF HTML so Tamil glyphs are shaped correctly."""
+    import fitz
+
+    book_name = row['book_name']
+    tss = sent_data.get('target', {})
+    total_stems = row['unique_stems'] or row['unique_words']
+    first_readable = next((r for r in results if r['comprehension_pct'] >= 80), None)
+    generated = row["analyzed_at"][:19]
+
+    def esc(value):
+        return html.escape(str(value if value is not None else ''))
+
+    def word_html(value):
+        text = str(value if value is not None else '')
+        clusters = []
+        for ch in text:
+            if clusters and ('\u0BBE' <= ch <= '\u0BCD' or ch in {'\u0B82', '\u0B83', '\u0BD7'}):
+                clusters[-1] += ch
+            else:
+                clusters.append(ch)
+        chunks = [''.join(clusters[i:i+6]) for i in range(0, len(clusters), 6)]
+        return '<br>'.join(html.escape(chunk) for chunk in chunks)
+
+    def show_pct(value):
+        return esc(value if value not in (None, '') else '-')
+
+    def word_grid(words, cols=4, limit=None):
+        shown = list(words or [])
+        extra = 0
+        if limit and len(shown) > limit:
+            extra = len(shown) - limit
+            shown = shown[:limit]
+        cells = []
+        for i, word in enumerate(shown):
+            if i % cols == 0:
+                cells.append('<tr>')
+            cells.append(f'<td class="word">{word_html(word)}</td>')
+            if i % cols == cols - 1:
+                cells.append('</tr>')
+        if shown and len(shown) % cols:
+            for _ in range(cols - (len(shown) % cols)):
+                cells.append('<td class="word empty"></td>')
+            cells.append('</tr>')
+        if not shown:
+            return ''
+        note = f'<p class="note">... and {extra:,} more (see Excel export for full list)</p>' if extra else ''
+        return f'<table class="word-grid">{"".join(cells)}</table>{note}'
+
+    overview_rows = [
+        ('Total words in book', f"{row['total_words']:,}"),
+        ('Unique Tamil stems (after morphological analysis)', f"{total_stems:,}"),
+        ('Proper nouns (counted as known)', str(len(proper_nouns))),
+        ('First readable from', f"Standard {first_readable['grade']}" if first_readable else 'Beyond Std 12'),
+        ('Target book - average words per sentence', tss.get('avg', '-')),
+        ('Target book - max words in one sentence', tss.get('max', '-')),
+        ('Target book - total sentences analysed', f"{tss.get('total_sentences', 0):,}"),
+    ]
+    overview_html = ''.join(f'<tr><th>{esc(k)}</th><td>{esc(v)}</td></tr>' for k, v in overview_rows)
+
+    readability_rows = []
+    for r in results:
+        known_pct = r['known_pct']
+        verdict = 'Easy' if known_pct >= 90 else 'Readable' if known_pct >= 80 else 'Challenging' if known_pct >= 60 else 'Very Hard'
+        verdict_class = 'good' if r['comprehension_pct'] >= 80 else 'mid' if r['comprehension_pct'] >= 60 else 'hard'
+        readability_rows.append(
+            '<tr>'
+            f'<td>Std 1-{esc(r["grade"])}</td>'
+            f'<td>{int(r["total_unique_book_words"]):,}</td>'
+            f'<td>{int(r["known_words"]):,}</td>'
+            f'<td class="{verdict_class}">{show_pct(r["known_pct"])}%</td>'
+            f'<td>{int(r["new_words"]):,}</td>'
+            f'<td>{show_pct(r["new_pct"])}%</td>'
+            f'<td class="{verdict_class}">{verdict}</td>'
+            f'<td>{esc(r.get("grade_sent_max", "-"))}</td>'
+            f'<td>{esc(r.get("target_sentences_over_max", "-"))}</td>'
+            '</tr>'
+        )
+
+    distribution_rows = []
+    for drow in distribution:
+        label = drow.get('label') or f"Std {drow.get('grade')}"
+        distribution_rows.append(
+            '<tr>'
+            f'<td>{esc(label)}</td>'
+            f'<td>{int(drow.get("word_count", 0)):,}</td>'
+            f'<td>{show_pct(drow.get("word_pct", 0))}%</td>'
+            '</tr>'
+        )
+
+    sentence_rows = []
+    target_avg = tss.get('avg', 0)
+    for r in results:
+        gmax = r.get('grade_sent_max', 0)
+        over_pct = r.get('target_pct_over_max', 0)
+        difficulty = ''
+        if gmax > 0:
+            difficulty = 'High' if over_pct > 50 else 'Medium' if over_pct > 20 else 'Low'
+        sentence_rows.append(
+            '<tr>'
+            f'<td>Std {esc(r["grade"])}</td>'
+            f'<td>{esc(gmax if gmax else "-")}</td>'
+            f'<td>{esc(r.get("grade_sent_avg", "-"))}</td>'
+            f'<td>{esc(target_avg)}</td>'
+            f'<td>{esc(r.get("target_sentences_over_max", 0))}</td>'
+            f'<td>{show_pct(over_pct)}% {esc(f"[{difficulty}]" if difficulty else "")}</td>'
+            '</tr>'
+        )
+
+    section3 = []
+    for r in results:
+        nw = r.get('new_at_grade_list', r.get('new_word_list', []))
+        if not nw:
+            continue
+        pct_value = r.get('new_at_grade_pct', r.get('new_words_pct', 0))
+        section3.append(
+            f'<h2>Standard 1-{esc(r["grade"])} - {len(nw):,} words introduced at Std {esc(r["grade"])} '
+            f'({show_pct(pct_value)}% of book vocabulary)</h2>{word_grid(nw)}'
+        )
+
+    section4 = []
+    for r in results:
+        uw = r.get('new_word_list', r.get('unknown_word_list', []))
+        heading = (
+            f'<h2>Standard 1-{esc(r["grade"])} - '
+            f'{int(r.get("new_words", r.get("unknown_words", 0))):,} new words for student '
+            f'({show_pct(r.get("new_pct", round(100-r.get("known_pct", r.get("comprehension_pct", 100)), 1)))}% of book vocabulary)</h2>'
+        )
+        body = word_grid(uw, limit=300) if uw else '<p class="note">No new words - this student already knows every word in this book.</p>'
+        section4.append(heading + body)
+
+    proper_nouns_html = ''
+    if proper_nouns:
+        proper_nouns_html = (
+            '<section class="page-break"><h1>Section 5 - Proper Nouns (Counted as Known)</h1>'
+            '<p class="note">These words were identified as names, places, deities, or foreign proper nouns. '
+            'They are counted as known at all grade levels since students can learn them from context.</p>'
+            f'{word_grid(proper_nouns, cols=5)}</section>'
+        )
+
+    doc_html = f"""<!doctype html>
+<html lang="ta">
+<head>
+<meta charset="utf-8">
+<style>
+  body {{ font-family: "Noto Sans Tamil", "Noto Serif Tamil", "Lohit Tamil", sans-serif; color:#1a1814; font-size:10pt; line-height:1.55; }}
+  h1 {{ color:#1D4E89; font-size:17pt; line-height:1.25; margin:18pt 0 6pt; page-break-after:avoid; }}
+  h2 {{ color:#2e6da4; font-size:13pt; line-height:1.35; margin:14pt 0 5pt; page-break-after:avoid; }}
+  .cover {{ text-align:center; margin-top:34pt; border-bottom:1px solid #1D4E89; padding-bottom:18pt; }}
+  .cover h1 {{ font-size:21pt; margin-bottom:4pt; }}
+  .subtitle {{ color:#5c574f; font-size:11pt; }}
+  .note {{ color:#666; font-size:8.5pt; margin:2pt 0 8pt; }}
+  table {{ width:100%; border-collapse:collapse; margin:5pt 0 12pt; page-break-inside:auto; }}
+  th, td {{ border:0.35pt solid #bbbbbb; padding:4pt 5pt; vertical-align:top; }}
+  th {{ background:#1D4E89; color:white; font-weight:bold; }}
+  .overview th {{ width:65%; background:#D6EAF8; color:#1a1814; text-align:left; }}
+  .overview td {{ width:35%; }}
+  tr:nth-child(even) td, .overview tr:nth-child(even) th {{ background:#F0EDE8; }}
+  .numeric td:not(:first-child), .numeric th:not(:first-child) {{ text-align:center; }}
+  .good {{ background:#D4EDDA; }}
+  .mid {{ background:#FFF3CD; }}
+  .hard {{ background:#F8D7DA; }}
+  .word-grid {{ table-layout:fixed; font-size:9pt; line-height:1.45; }}
+  .word-grid td {{ min-height:18pt; overflow-wrap:anywhere; word-break:break-word; background:white !important; }}
+  .word-grid tr:nth-child(even) td {{ background:#F8D7DA !important; }}
+  .word-grid .empty {{ background:white !important; }}
+  .page-break {{ page-break-before:always; }}
+</style>
+</head>
+<body>
+  <section class="cover">
+    <h1>Tamil Book Readability Report</h1>
+    <div class="subtitle">{esc(book_name)}</div>
+    <div class="subtitle">Generated: {esc(generated)}</div>
+  </section>
+
+  <h1>Overview</h1>
+  <table class="overview">{overview_html}</table>
+
+  <h1>Section 1 - Readability by Standard</h1>
+  <p class="note">Each row is cumulative. Known words are words from the book the student already knows; new words are words in the book the student has not yet learned.</p>
+  <table class="numeric">
+    <tr><th>Standard</th><th>Total unique<br>words</th><th>Known words</th><th>% known</th><th>New words</th><th>% new</th><th>Verdict</th><th>Grade max<br>sentence</th><th>Sentences<br>over max</th></tr>
+    {''.join(readability_rows)}
+  </table>
+
+  <h1>Word Distribution by Class</h1>
+  <p class="note">Each unique book word is assigned to the first class where it appears in the loaded textbook database. The final row lists words not found in any class.</p>
+  <table class="numeric"><tr><th>Class</th><th>Words</th><th>% of book vocabulary</th></tr>{''.join(distribution_rows)}</table>
+
+  <section class="page-break">
+    <h1>Section 2 - Sentence Complexity Analysis</h1>
+    <p class="note">Compares sentence length distribution of the target book against each school standard's textbook.</p>
+    <table class="numeric"><tr><th>Standard</th><th>Grade book<br>max sentence</th><th>Grade book<br>avg sentence</th><th>Target book<br>avg sentence</th><th>Sentences in<br>target &gt; grade max</th><th>% sentences<br>over grade max</th></tr>{''.join(sentence_rows)}</table>
+    <p class="note">Target book sentence stats - Average: {esc(tss.get("avg","-"))} words/sentence | Max: {esc(tss.get("max","-"))} words | Median: {esc(tss.get("median","-"))} words | Total sentences: {int(tss.get("total_sentences",0)):,}</p>
+  </section>
+
+  <section class="page-break">
+    <h1>Section 3 - New Words Introduced per Standard</h1>
+    <p class="note">For each standard, the words in this book that become newly known after completing that standard.</p>
+    {''.join(section3)}
+  </section>
+
+  <section class="page-break">
+    <h1>Section 4 - New Words for Student per Standard</h1>
+    <p class="note">Words in this book that are new to a student at each level - not yet encountered in their studies up to that standard.</p>
+    {''.join(section4)}
+  </section>
+
+  {proper_nouns_html}
+</body>
+</html>"""
+
+    page = fitz.Rect(0, 0, 595, 842)
+    body = fitz.Rect(50, 50, 545, 792)
+    out_path = os.path.join(tempfile.gettempdir(), f'tamil_report_{uuid.uuid4().hex}.pdf')
+    writer = fitz.DocumentWriter(out_path)
+    try:
+        story = fitz.Story(doc_html)
+
+        def rectfn(_rect_num, _filled):
+            return page, body, fitz.Matrix(1, 1)
+
+        story.write(writer, rectfn)
+        writer.close()
+        with open(out_path, 'rb') as fh:
+            return fh.read()
+    finally:
+        try:
+            writer.close()
+        except Exception:
+            pass
+        try:
+            os.remove(out_path)
+        except OSError:
+            pass
+
 @app.route('/api/report/<int:analysis_id>')
 def generate_report(analysis_id):
     conn = get_db()
@@ -2809,6 +3537,15 @@ def generate_report(analysis_id):
     book_name    = row['book_name']
     tss          = sent_data.get('target', {})
     meaning      = json.loads(row.get('meaning_json') or 'null') if 'meaning_json' in row.keys() else None
+
+    try:
+        pdf_bytes = _generate_shaped_tamil_report_pdf(row, results, distribution, proper_nouns, sent_data, meaning)
+        safe_name = re.sub(r'[^\w]', '_', os.path.splitext(book_name)[0])
+        return send_file(io.BytesIO(pdf_bytes), mimetype='application/pdf',
+                         as_attachment=True,
+                         download_name=f'report_{safe_name}.pdf')
+    except Exception:
+        logging.getLogger('app').exception('PyMuPDF Tamil report generation failed; falling back to ReportLab')
 
     try:
         from reportlab.lib.pagesizes import A4
@@ -3504,9 +4241,6 @@ def check_words():
                    conn.execute('SELECT * FROM grade_meta ORDER BY grade').fetchall()}
     conn.close()
 
-    if not grade_rows:
-        return jsonify({'error': 'No school books loaded yet.'}), 400
-
     grade_vocab = {}
     for r in grade_rows:
         g = r['grade']
@@ -3528,6 +4262,7 @@ def check_words():
 
     unique_stems  = set(all_stems)
     total_unique  = len(unique_stems)
+    wiki_info = _wlib.lookup_wiki_words(list(unique_stems))
 
     # ── Comprehension table (same logic as book analysis) ─────────────────────
     comprehension_table = []
@@ -3573,11 +4308,15 @@ def check_words():
         word  = m.group()
         stem  = get_stem(word)
         grade = word_grade_map.get(stem)
+        wiki = wiki_info.get(stem) or {}
         inline_tokens.append({
             'type':  'word',
             'value': word,
             'stem':  stem,
             'grade': grade,
+            'wiki_grade': wiki.get('inferred_grade'),
+            'wiki_confidence': wiki.get('confidence'),
+            'wiki_reason': wiki.get('grade_reason'),
         })
         pos = m.end()
     if pos < len(text):
@@ -3636,6 +4375,65 @@ def check_words():
         for s in unique_stems
         if word_grade_map.get(s) is None
     ))
+    wiki_unknown = []
+    unknown_word_details = _unknown_word_details(
+        [
+            s for s in unique_stems
+            if word_grade_map.get(s) is None
+        ],
+        stem_to_original,
+        stem_freq,
+        fallback_grade=best_grade or 8,
+    )
+    for stem in sorted(unique_stems):
+        if word_grade_map.get(stem) is not None:
+            continue
+        info = wiki_info.get(stem)
+        if not info:
+            continue
+        wiki_unknown.append({
+            'stem': stem,
+            'word': stem_to_original.get(stem, stem),
+            'estimated_grade': info.get('inferred_grade'),
+            'confidence': info.get('confidence'),
+            'reason': info.get('grade_reason'),
+            'frequency': info.get('frequency'),
+        })
+
+    try:
+        tamil_context = _corpus_readability.analyze_text(
+            text,
+            corpus=_corpus_readability.load_corpus(),
+            stem_fn=get_stem,
+        )
+        morphology_data = tamil_context.get('morphology')
+    except Exception as e:
+        tamil_context = {'enabled': False, 'error': str(e)}
+        morphology_data = {'enabled': False, 'error': str(e)}
+
+    if not morphology_data:
+        try:
+            morphology_data = _tamil_morphology.analyze_text(
+                text,
+                known_stems=set(wiki_info.keys()) | set(word_grade_map.keys()),
+                stem_fn=get_stem,
+            )
+        except Exception as e:
+            morphology_data = {'enabled': False, 'error': str(e)}
+
+    try:
+        level_norm_data = _level_norms.analyze_text(text, target_grade=best_grade)
+    except Exception as e:
+        level_norm_data = {'enabled': False, 'error': str(e)}
+
+    try:
+        meaning_target = int(best_grade or 12)
+        meaning_data = _meaning_kb.analyze_text_meaning(
+            text, meaning_target, 'data/meaning_kb',
+            tokenize_fn=tokenize_tamil, stem_fn=get_stem, limit=120
+        )
+    except Exception as e:
+        meaning_data = {'enabled': False, 'error': str(e)}
 
     return jsonify({
         'total_words':         len(raw_words),
@@ -3643,9 +4441,15 @@ def check_words():
         'best_grade':          best_grade,
         'unknown_count':       len(unknown_list),
         'unknown_list':        unknown_list,
+        'unknown_word_details': unknown_word_details,
         'comprehension_table': comprehension_table,
         'inline_tokens':       inline_tokens,
         'sentence_results':    sentence_results,
+        'tamil_context':       tamil_context,
+        'morphology':          morphology_data,
+        'level_norms':         level_norm_data,
+        'meaning':             meaning_data,
+        'wiki_unknown':        wiki_unknown[:120],
     })
 
 
@@ -3857,8 +4661,6 @@ def batch_upload():
     conn = get_db()
     rows = conn.execute('SELECT word FROM grade_words').fetchall()
     conn.close()
-    if not rows:
-        return jsonify({'error': 'No school books uploaded yet.'}), 400
 
     batch_id  = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
     results   = []
@@ -3898,9 +4700,18 @@ def batch_upload():
             conn2.close()
             grade_vocab_union = {r['word'] for r in gv_rows}
             flagged = detect_proper_nouns(stem_freq, grade_vocab_union)
+            if not grade_vocab_union:
+                flagged = {
+                    stem: reasons for stem, reasons in flagged.items()
+                    if any(reason != 'rare unknown word' for reason in reasons)
+                }
 
             tsc = sentence_word_counts(text)
             conn3 = get_db()
+            try:
+                conn3.execute("ALTER TABLE pending_extractions ADD COLUMN raw_text TEXT")
+            except Exception:
+                pass
             # Note: do NOT delete pending_extractions here — batch mode needs all rows
             conn3.execute("""
                 INSERT INTO pending_extractions
@@ -3912,6 +4723,8 @@ def batch_upload():
                   json.dumps(stem_to_original), json.dumps(stem_freq),
                   json.dumps({s: list(r) for s, r in flagged.items()}),
                   json.dumps(tsc[:2000])))
+            conn3.execute("UPDATE pending_extractions SET raw_text = ? WHERE id = (SELECT last_insert_rowid())",
+                          (text[:500000],))
             conn3.commit()
             pid = conn3.execute('SELECT last_insert_rowid()').fetchone()[0]
             conn3.close()
@@ -4621,6 +5434,55 @@ def library_wiki_status():
         return jsonify(dict(_WLIB_BUILD_STATUS))
 
 
+@app.route('/api/library/wiki_stats')
+def library_wiki_stats():
+    try:
+        stats = _wlib.get_wiki_stats()
+        # Also expose the old mixed-library count so users can see whether
+        # existing imports predate the separate Wikipedia corpus DB.
+        lib_conn = _wlib.get_lib_db()
+        mixed_count = lib_conn.execute(
+            "SELECT COUNT(*) FROM word_library WHERE grade_source='wikipedia'"
+        ).fetchone()[0]
+        lib_conn.close()
+        if not stats.get('total_stems') and mixed_count:
+            _wlib.backfill_wiki_db_from_library()
+            stats = _wlib.get_wiki_stats()
+        stats['word_library_wikipedia_count'] = mixed_count
+        return jsonify(stats)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/library/wiki_rebuild_db', methods=['POST'])
+def library_wiki_rebuild_db():
+    """Build the separate Wikipedia corpus DB from an already downloaded dump."""
+    data = request.json or {}
+    dump_type = data.get('dump_type', 'abstracts')
+    path = _wlib.download_wiki_dump(dump_type)
+    if not path:
+        return jsonify({'error': f'No downloaded {dump_type} dump found and download failed.'}), 400
+    conn = get_db()
+    wgm = {r['stem']: r['first_grade']
+           for r in conn.execute('SELECT stem, first_grade FROM word_grade_map').fetchall()}
+    conn.close()
+    result = _wlib.import_from_wiki_dump(path, stem_fn=get_stem, known_grade_map=wgm)
+    return jsonify(result)
+
+
+@app.route('/api/library/wiki_estimate_grades', methods=['POST'])
+def library_wiki_estimate_grades():
+    """Estimate and persist approximate Std 1-12 levels for all Wiki words."""
+    try:
+        conn = get_db()
+        wgm = {r['stem']: r['first_grade']
+               for r in conn.execute('SELECT stem, first_grade FROM word_grade_map').fetchall()}
+        conn.close()
+        return jsonify(_wlib.estimate_wiki_grade_levels(known_grade_map=wgm))
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
 @app.route('/api/library/manual', methods=['POST'])
 def library_manual_entry():
     """Add or override a word manually."""
@@ -4640,6 +5502,9 @@ def library_manual_entry():
             part_of_speech=data.get('part_of_speech'),
             example=data.get('example'),
         )
+        if data.get('sync_to_analyzer', True):
+            _sync_confirmed_word_to_analyzer(stem, int(grade))
+            result['synced'] = True
         return jsonify(result)
     except Exception as e:
         return jsonify({'error': str(e)}), 500

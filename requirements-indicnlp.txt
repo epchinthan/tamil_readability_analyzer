@@ -1,0 +1,4 @@
+# Optional Tamil NLP helpers: normalization, tokenization, sentence splitting,
+# and orthographic syllable counting. The app falls back to its built-in regex
+# logic when this package is not installed.
+indic-nlp-library>=0.92

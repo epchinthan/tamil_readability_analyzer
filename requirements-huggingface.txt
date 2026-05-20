@@ -1,0 +1,2 @@
+# Optional: import external Hugging Face Tamil corpora into data/corpus_sources.
+datasets>=2.19.0

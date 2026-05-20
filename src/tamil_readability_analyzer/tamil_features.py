@@ -11,6 +11,8 @@ import unicodedata
 from collections import Counter
 from typing import Callable, Dict, List
 
+from . import analytics as _analytics
+
 TAMIL_WORD_RE = re.compile(r'[\u0B80-\u0BFF]{2,}')
 SENT_RE = re.compile(r'[.!?।\u0964\u0965\n]+')
 
@@ -207,6 +209,7 @@ def analyze(text: str, stem_fn: Callable[[str], str] | None = None) -> Dict:
         'poem_prose': detect_poem_prose(text),
         'idioms': detect_idioms(text),
         'grammar': grammar_load(text),
+        'child_level_features': _analytics.child_level_features(text, stem_fn=stem_fn),
         'spoken_tamil': spoken_tamil(text),
         'rewrite_levels': rewrite_levels(text),
         'vocabulary_ladder': vocabulary_ladder(text, stem_fn=stem_fn),

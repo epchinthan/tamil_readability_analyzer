@@ -45,5 +45,19 @@ if shutil.which("tesseract"):
         ok = False
         print(f"  ✗ Could not read Tesseract languages: {exc}")
 
+print("\nOptional Tamil NLP enhancements:")
+try:
+    from . import indic_nlp_adapter
+
+    status = indic_nlp_adapter.status()
+    if status["available"]:
+        print("  ✓ indic-nlp-library: available")
+        print(f"  {'✓' if status['normalizer'] else '⚠'} Tamil normalizer: {'available' if status['normalizer'] else 'fallback mode'}")
+    else:
+        print("  ⚠ indic-nlp-library: not installed")
+        print("    Optional: pip install -r requirements-indicnlp.txt")
+except Exception as exc:
+    print(f"  ⚠ indic-nlp-library check failed: {exc}")
+
 print("\nResult:", "READY" if ok else "PARTIAL - see warnings above")
 sys.exit(0 if ok else 1)

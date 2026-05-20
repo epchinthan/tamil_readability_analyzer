@@ -257,6 +257,95 @@ export TAMIL_READING_ASR_CMD="/path/to/asr --lang {lang} --audio {wav}"
 ./start.sh
 ```
 
+## Optional: Indic NLP Library enhancements
+
+The analyzer can use `indic-nlp-library` when it is installed, mainly for Tamil
+normalization, tokenization, sentence splitting, and orthographic syllable
+counts. This is optional; without it, the app keeps using its built-in Tamil
+regex fallback.
+
+```bash
+.venv/bin/python -m pip install -r requirements-indicnlp.txt
+.venv/bin/python doctor.py
+```
+
+Or enable it during setup:
+
+```bash
+export TAMIL_ANALYZER_INSTALL_INDICNLP=1
+./start.sh
+```
+
+Good next corpus/resource targets are tracked from the Tamil NLP catalog:
+Tamil Wikipedia/Wiktionary dumps, Project Madurai, OSCAR/IndicCorp where
+licensing allows, school textbook text, and Tamil speech datasets for future
+reading-practice validation. `iNLTK` is intentionally not part of the main
+install because its older ML dependency stack is heavy for this local tool.
+
+## Optional: Mozhi AI Tamil corpus import
+
+The Hugging Face dataset `mozhi-ai/tamil-corpus` can be used as a broad general
+Tamil background corpus for TAVI. It is best used for word familiarity and rare
+word smoothing, not as a school-grade ground truth.
+
+```bash
+.venv/bin/python -m pip install -r requirements-huggingface.txt
+.venv/bin/python tools/import_mozhi_tamil_corpus.py --max-rows 5000 --min-quality 0.90
+```
+
+Then rebuild the corpus from the app. Imported chunks are written to:
+
+```text
+data/corpus_sources/mozhi_ai_tamil_corpus/
+```
+
+Review `metadata.json` in that folder before distributing derived data. The
+dataset card lists the dataset license as `cc-by-sa-4.0`, while rows may carry
+their own source/license metadata.
+
+## Optional: Tamil ASR transcript import
+
+The Hugging Face dataset `parambharat/tamil_asr_corpus` is an Automatic Speech
+Recognition dataset, not a graded reading corpus. It is useful for spoken Tamil
+transcript familiarity and future ASR evaluation, but it should not be used for
+age/grade sorting. The full audio archive is several GB, so the helper below
+imports only transcript metadata.
+
+```bash
+.venv/bin/python tools/import_tamil_asr_transcripts.py --split test --max-rows 5000
+```
+
+This writes:
+
+```text
+data/corpus_sources/tamil_asr_corpus_transcripts/
+```
+
+After importing, rebuild the corpus from the app if you want TAVI to consider
+these transcripts as a separate spoken-Tamil background source. For ASR model
+quality testing, use `manifest.jsonl` in that folder as the expected transcript
+list and download audio separately only when needed.
+
+## Optional: local large corpus sampling
+
+If you have multi-GB Tamil corpus files in `corpus/`, sample them into bounded
+chunks before rebuilding TAVI. This avoids loading huge files into memory or
+letting general news/web text overpower the school-grade signal.
+
+```bash
+.venv/bin/python tools/import_local_corpus_samples.py --max-rows-per-file 5000
+```
+
+This writes sampled files to:
+
+```text
+data/corpus_sources/local_large_corpus/
+```
+
+Use these corpora as general frequency/background sources only. They are not
+age-graded, so words found only here should be labelled "general Tamil" rather
+than assigned to a school standard.
+
 
 ## Meaning-level appropriateness (offline)
 

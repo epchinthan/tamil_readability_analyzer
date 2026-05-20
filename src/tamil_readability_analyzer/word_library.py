@@ -26,6 +26,7 @@ from typing import Dict, List, Optional, Tuple
 TAMIL_RE   = re.compile(r'[\u0B80-\u0BFF]{2,}')
 SENT_RE    = re.compile(r'(?<=[.!?।\u0964\u0965])\s+|\n+')
 LIB_DB     = 'word_library.db'
+WIKI_DB    = 'data/wiki_corpus.db'
 
 # Concept seed words — used for category classification
 CONCEPT_SEEDS: Dict[str, List[str]] = {
@@ -144,6 +145,341 @@ def init_library_db() -> None:
     ''')
     conn.commit()
     conn.close()
+
+
+def get_wiki_db() -> sqlite3.Connection:
+    Path(WIKI_DB).parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(WIKI_DB, timeout=30)
+    conn.row_factory = sqlite3.Row
+    conn.execute('PRAGMA journal_mode=WAL')
+    conn.execute('PRAGMA synchronous=NORMAL')
+    return conn
+
+
+def init_wiki_db() -> None:
+    conn = get_wiki_db()
+    conn.executescript('''
+        CREATE TABLE IF NOT EXISTS wiki_words (
+            stem            TEXT PRIMARY KEY,
+            display_word    TEXT,
+            inferred_grade  INTEGER,
+            confidence      REAL DEFAULT 0,
+            frequency       INTEGER DEFAULT 0,
+            example         TEXT,
+            article_count   INTEGER DEFAULT 0,
+            source_dump     TEXT,
+            grade_reason    TEXT,
+            grade_estimated_at TEXT,
+            updated_at      TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_wiki_grade ON wiki_words(inferred_grade);
+        CREATE INDEX IF NOT EXISTS idx_wiki_freq ON wiki_words(frequency);
+
+        CREATE TABLE IF NOT EXISTS wiki_imports (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            dump_path      TEXT,
+            dump_type      TEXT,
+            article_count  INTEGER DEFAULT 0,
+            stem_count     INTEGER DEFAULT 0,
+            imported_at    TEXT,
+            status         TEXT
+        );
+    ''')
+    for col, spec in [
+        ('grade_reason', 'TEXT'),
+        ('grade_estimated_at', 'TEXT'),
+    ]:
+        try:
+            conn.execute(f'ALTER TABLE wiki_words ADD COLUMN {col} {spec}')
+        except sqlite3.OperationalError:
+            pass
+    conn.commit()
+    conn.close()
+
+
+def upsert_wiki_word(
+    conn: sqlite3.Connection,
+    *,
+    stem: str,
+    display_word: str,
+    inferred_grade: int,
+    confidence: float,
+    frequency: int,
+    example: Optional[str],
+    source_dump: str,
+) -> None:
+    now = datetime.datetime.now().isoformat()
+    existing = conn.execute('SELECT * FROM wiki_words WHERE stem=?', (stem,)).fetchone()
+    if existing is None:
+        conn.execute('''
+            INSERT INTO wiki_words
+              (stem, display_word, inferred_grade, confidence, frequency,
+               example, article_count, source_dump, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?)
+        ''', (stem, display_word, inferred_grade, confidence, frequency,
+              example, 1, source_dump, now))
+        return
+    existing = dict(existing)
+    old_freq = int(existing.get('frequency') or 0)
+    new_freq = old_freq + frequency
+    old_conf = float(existing.get('confidence') or 0)
+    keep_new_grade = confidence > old_conf or (
+        confidence == old_conf and inferred_grade < int(existing.get('inferred_grade') or 99)
+    )
+    conn.execute('''
+        UPDATE wiki_words SET
+          display_word=?,
+          inferred_grade=?,
+          confidence=?,
+          frequency=?,
+          example=?,
+          article_count=?,
+          source_dump=?,
+          updated_at=?
+        WHERE stem=?
+    ''', (
+        display_word or existing.get('display_word') or stem,
+        inferred_grade if keep_new_grade else existing.get('inferred_grade'),
+        confidence if keep_new_grade else old_conf,
+        new_freq,
+        existing.get('example') or example,
+        int(existing.get('article_count') or 0) + 1,
+        source_dump,
+        now,
+        stem,
+    ))
+
+
+def get_wiki_stats() -> Dict:
+    init_wiki_db()
+    conn = get_wiki_db()
+    total = conn.execute('SELECT COUNT(*) FROM wiki_words').fetchone()[0]
+    tokens = conn.execute('SELECT COALESCE(SUM(frequency), 0) FROM wiki_words').fetchone()[0]
+    by_grade = conn.execute('''
+        SELECT inferred_grade AS grade, COUNT(*) AS cnt
+        FROM wiki_words GROUP BY inferred_grade ORDER BY inferred_grade
+    ''').fetchall()
+    by_reason = conn.execute('''
+        SELECT COALESCE(grade_reason, 'not_estimated') AS reason, COUNT(*) AS cnt
+        FROM wiki_words GROUP BY COALESCE(grade_reason, 'not_estimated')
+        ORDER BY cnt DESC LIMIT 12
+    ''').fetchall()
+    estimated = conn.execute('''
+        SELECT COUNT(*) FROM wiki_words
+        WHERE grade_estimated_at IS NOT NULL
+    ''').fetchone()[0]
+    avg_conf = conn.execute('''
+        SELECT COALESCE(AVG(confidence), 0) FROM wiki_words
+        WHERE grade_estimated_at IS NOT NULL
+    ''').fetchone()[0]
+    imports = conn.execute('SELECT * FROM wiki_imports ORDER BY imported_at DESC LIMIT 10').fetchall()
+    top = conn.execute('''
+        SELECT stem, display_word, inferred_grade, confidence, grade_reason, frequency
+        FROM wiki_words ORDER BY frequency DESC LIMIT 20
+    ''').fetchall()
+    conn.close()
+    return {
+        'database': WIKI_DB,
+        'total_stems': total,
+        'total_tokens': tokens,
+        'estimated_count': estimated,
+        'avg_confidence': round(float(avg_conf or 0), 2),
+        'by_grade': [dict(r) for r in by_grade],
+        'by_reason': [dict(r) for r in by_reason],
+        'imports': [dict(r) for r in imports],
+        'top_words': [dict(r) for r in top],
+    }
+
+
+FORMAL_GRADE_SUFFIXES = ('த்துவம்', 'வியல்', 'வாதம்', 'வாதி', 'முறை', 'நிலை', 'பாடு')
+TECHNICAL_HINTS = (
+    'வியல்', 'அறிவியல்', 'தொழில்', 'அரசியல்', 'பொருளாதார', 'வரலாறு',
+    'இலக்கிய', 'இலக்கண', 'வேதியியல்', 'இயற்பியல்', 'உயிரியல்',
+)
+
+
+def _estimate_grade_for_wiki_word(
+    stem: str,
+    display_word: str,
+    frequency: int,
+    max_frequency: int,
+    known_grade_map: Optional[Dict[str, int]] = None,
+) -> Tuple[int, float, str]:
+    known_grade_map = known_grade_map or {}
+    if stem in known_grade_map:
+        return max(1, min(12, int(known_grade_map[stem]))), 0.98, 'textbook_anchor'
+
+    word = display_word or stem
+    freq_ratio = (frequency / max_frequency) if max_frequency else 0.0
+
+    if freq_ratio >= 0.020:
+        grade, conf, reason = 3, 0.70, 'very_common_wikipedia'
+    elif freq_ratio >= 0.006:
+        grade, conf, reason = 5, 0.64, 'common_wikipedia'
+    elif freq_ratio >= 0.0015:
+        grade, conf, reason = 7, 0.58, 'moderate_wikipedia'
+    elif frequency >= 25:
+        grade, conf, reason = 9, 0.52, 'less_common_wikipedia'
+    else:
+        grade, conf, reason = 11, 0.45, 'rare_wikipedia'
+
+    concept = classify_concept(stem)
+    if concept in {'daily_life', 'nature_environment', 'health_body'}:
+        grade -= 1
+        conf += 0.04
+        reason += '+daily_concept'
+    elif concept in {'science_technology', 'society_civics', 'history_culture', 'math_logic'}:
+        grade += 1
+        conf += 0.04
+        reason += '+academic_concept'
+
+    if len(word) >= 12:
+        grade += 1
+        conf += 0.03
+        reason += '+long_word'
+    if len(word) >= 16:
+        grade += 1
+        reason += '+very_long_word'
+    if word.endswith(FORMAL_GRADE_SUFFIXES) or any(h in word for h in TECHNICAL_HINTS):
+        grade += 1
+        conf += 0.04
+        reason += '+formal_or_technical'
+
+    if stem in STOPWORDS:
+        grade = min(grade, 3)
+        conf = max(conf, 0.70)
+        reason = 'common_function_word'
+
+    return max(1, min(12, grade)), round(min(conf, 0.92), 2), reason
+
+
+def estimate_wiki_grade_levels(
+    known_grade_map: Optional[Dict[str, int]] = None,
+    batch_size: int = 5000,
+) -> Dict:
+    """Estimate and store Std 1-12 levels for every word in wiki_corpus.db.
+
+    Grades are approximate. `grade_reason` and `confidence` distinguish
+    textbook-anchored estimates from broader frequency/morphology heuristics.
+    """
+    init_wiki_db()
+    known_grade_map = known_grade_map or {}
+    conn = get_wiki_db()
+    max_frequency = conn.execute(
+        'SELECT COALESCE(MAX(frequency), 0) FROM wiki_words'
+    ).fetchone()[0] or 0
+    rows = conn.execute('''
+        SELECT stem, display_word, frequency
+        FROM wiki_words
+        ORDER BY frequency DESC
+    ''').fetchall()
+    now = datetime.datetime.now().isoformat()
+    by_grade: Counter[int] = Counter()
+    by_reason: Counter[str] = Counter()
+    updated = 0
+    anchored = 0
+    for r in rows:
+        grade, confidence, reason = _estimate_grade_for_wiki_word(
+            r['stem'], r['display_word'] or r['stem'], int(r['frequency'] or 0),
+            int(max_frequency or 0), known_grade_map
+        )
+        if reason == 'textbook_anchor':
+            anchored += 1
+        by_grade[grade] += 1
+        by_reason[reason.split('+')[0]] += 1
+        conn.execute('''
+            UPDATE wiki_words
+            SET inferred_grade=?, confidence=?, grade_reason=?,
+                grade_estimated_at=?, updated_at=?
+            WHERE stem=?
+        ''', (grade, confidence, reason, now, now, r['stem']))
+        updated += 1
+        if updated % int(batch_size) == 0:
+            conn.commit()
+    conn.execute('''
+        INSERT INTO wiki_imports
+          (dump_path, dump_type, article_count, stem_count, imported_at, status)
+        VALUES (?,?,?,?,?,?)
+    ''', (WIKI_DB, 'grade_estimation', 0, updated, now, 'active'))
+    conn.commit()
+    conn.close()
+    return {
+        'ok': True,
+        'database': WIKI_DB,
+        'updated': updated,
+        'textbook_anchored': anchored,
+        'heuristic_estimated': updated - anchored,
+        'by_grade': [{'grade': g, 'cnt': c} for g, c in sorted(by_grade.items())],
+        'by_reason': [{'reason': k, 'cnt': c} for k, c in by_reason.most_common()],
+    }
+
+
+def lookup_wiki_words(stems: List[str], limit: int = 500) -> Dict[str, Dict]:
+    """Return estimated Wikipedia grade info for the requested stems."""
+    init_wiki_db()
+    stems = [s for s in dict.fromkeys(stems or []) if s][:int(limit)]
+    if not stems:
+        return {}
+    conn = get_wiki_db()
+    out: Dict[str, Dict] = {}
+    for i in range(0, len(stems), 200):
+        chunk = stems[i:i + 200]
+        qs = ','.join(['?'] * len(chunk))
+        rows = conn.execute(f'''
+            SELECT stem, display_word, inferred_grade, confidence, grade_reason, frequency
+            FROM wiki_words
+            WHERE stem IN ({qs})
+        ''', chunk).fetchall()
+        for r in rows:
+            out[r['stem']] = dict(r)
+    conn.close()
+    return out
+
+
+def backfill_wiki_db_from_library(limit: int = 0) -> Dict:
+    """Copy existing Wikipedia rows from word_library.db into data/wiki_corpus.db.
+
+    This keeps older installs compatible after introducing the separate
+    Wikipedia corpus database.
+    """
+    init_library_db()
+    init_wiki_db()
+    lib_conn = get_lib_db()
+    wiki_conn = get_wiki_db()
+    query = '''
+        SELECT stem, display_word, grade_level, frequency, example
+        FROM word_library
+        WHERE grade_source='wikipedia'
+        ORDER BY frequency DESC
+    '''
+    if limit:
+        query += f' LIMIT {int(limit)}'
+    rows = lib_conn.execute(query).fetchall()
+    copied = 0
+    for r in rows:
+        upsert_wiki_word(
+            wiki_conn,
+            stem=r['stem'],
+            display_word=r['display_word'] or r['stem'],
+            inferred_grade=int(r['grade_level'] or 8),
+            confidence=0.0,
+            frequency=int(r['frequency'] or 1),
+            example=r['example'],
+            source_dump='backfilled_from_word_library',
+        )
+        copied += 1
+        if copied % 5000 == 0:
+            wiki_conn.commit()
+    now = datetime.datetime.now().isoformat()
+    wiki_conn.execute('''
+        INSERT INTO wiki_imports
+          (dump_path, dump_type, article_count, stem_count, imported_at, status)
+        VALUES (?,?,?,?,?,?)
+    ''', ('word_library.db', 'backfill', 0, copied, now, 'active'))
+    wiki_conn.commit()
+    lib_conn.close()
+    wiki_conn.close()
+    return {'copied': copied, 'database': WIKI_DB}
 
 
 # ── Concept classification ────────────────────────────────────────────────────
@@ -531,6 +867,7 @@ def import_from_wiki_dump(
     max_articles=0 means process all.
     """
     init_library_db()
+    init_wiki_db()
 
     import xml.etree.ElementTree as ET
     from io import BytesIO, TextIOWrapper
@@ -629,8 +966,11 @@ def import_from_wiki_dump(
     except Exception as e:
         return {'error': str(e)}
 
-    # Write to library DB
+    # Write to both databases:
+    # 1) word_library.db for grade-browsing/search UI
+    # 2) data/wiki_corpus.db as the separate Wikipedia corpus store
     lib_conn = get_lib_db()
+    wiki_conn = get_wiki_db()
     added = updated = 0
 
     for stem, sd in stem_data.items():
@@ -649,6 +989,16 @@ def import_from_wiki_dump(
             frequency=sd['freq'], source_name='tamil_wikipedia',
             example=example, example_source='Tamil Wikipedia',
         )
+        upsert_wiki_word(
+            wiki_conn,
+            stem=stem,
+            display_word=sd['display'],
+            inferred_grade=grade,
+            confidence=conf,
+            frequency=sd['freq'],
+            example=example,
+            source_dump=str(dump_path),
+        )
         if before: updated += 1
         else: added += 1
 
@@ -659,12 +1009,21 @@ def import_from_wiki_dump(
         VALUES (?,?,?,?,?,?,?)
     ''', ('tamil_wikipedia', 'wikipedia', None, str(dump_path),
           len(stem_data), now, 'active'))
+    wiki_conn.execute('''
+        INSERT INTO wiki_imports
+          (dump_path, dump_type, article_count, stem_count, imported_at, status)
+        VALUES (?,?,?,?,?,?)
+    ''', (str(dump_path), dump_path.suffix.lstrip('.') or 'wiki',
+          article_count, len(stem_data), now, 'active'))
 
     lib_conn.commit()
     lib_conn.close()
+    wiki_conn.commit()
+    wiki_conn.close()
 
     return {'added': added, 'updated': updated,
-            'articles': article_count, 'stems': len(stem_data)}
+            'articles': article_count, 'stems': len(stem_data),
+            'wiki_database': WIKI_DB}
 
 
 # ── Manual entry ──────────────────────────────────────────────────────────────

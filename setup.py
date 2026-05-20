@@ -28,6 +28,7 @@ ROOT = Path(__file__).resolve().parent
 VENV = ROOT / ".venv"
 REQ = ROOT / "requirements.txt"
 REQ_PADDLEOCR = ROOT / "requirements-paddleocr.txt"
+REQ_INDICNLP = ROOT / "requirements-indicnlp.txt"
 
 
 def run(cmd, check=False, capture=True, shell=False):
@@ -120,6 +121,7 @@ def install_python_packages():
     print("✓ Python packages installed")
 
     install_paddleocr_packages_best_effort()
+    install_indicnlp_packages_best_effort()
 
 
 def install_paddleocr_packages_best_effort():
@@ -141,6 +143,27 @@ def install_paddleocr_packages_best_effort():
     print("  The app will still run with Tesseract Tamil OCR.")
     print("  To retry later: ./start.sh")
     print("  To skip this optional install: export TAMIL_ANALYZER_SKIP_PADDLEOCR=1")
+    return False
+
+
+def install_indicnlp_packages_best_effort():
+    if os.environ.get("TAMIL_ANALYZER_INSTALL_INDICNLP") != "1":
+        print("⚠ Indic NLP Library install skipped. To enable: export TAMIL_ANALYZER_INSTALL_INDICNLP=1")
+        return False
+    if not REQ_INDICNLP.exists():
+        return False
+
+    print("\nInstalling optional Indic NLP Library helpers")
+    print("These improve Tamil normalization, sentence splitting, and syllable counts.")
+    py = str(venv_python())
+    result = run([py, "-m", "pip", "install", "-r", str(REQ_INDICNLP)], check=False, capture=False)
+    if result.returncode == 0:
+        print("✓ Optional Indic NLP Library packages installed")
+        return True
+
+    print("⚠ Optional Indic NLP Library install did not complete.")
+    print("  The app will still run with built-in Tamil regex fallback.")
+    print("  To retry later: export TAMIL_ANALYZER_INSTALL_INDICNLP=1 && ./start.sh")
     return False
 
 

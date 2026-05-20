@@ -521,6 +521,24 @@
           <div id="v27OfflineContent"></div>
         </div>
 
+        <div class="card" id="tamilContextCard" style="display:none">
+          <div class="card-title">TAVI - Tamil Adaptive Vocabulary Index</div>
+          <div id="tamilContextContent"></div>
+        </div>
+
+        <div class="card" id="bookNormsCard" style="display:none">
+          <div class="card-title">
+            <span>Grade-Level Sentence & Paragraph Norms</span>
+            <button class="btn btn-sm" onclick="buildLevelNorms()">Build / refresh norms</button>
+          </div>
+          <div id="bookNormsContent"></div>
+        </div>
+
+        <div class="card" id="bookChildLevelCard" style="display:none">
+          <div class="card-title">Children-book class-level signals</div>
+          <div id="bookChildLevelContent"></div>
+        </div>
+
         <div class="card" id="aiEnrichmentCard" style="display:none">
           <div class="card-title">🤖 Local AI Suggestions <span id="aiEnrichmentBadge" class="badge badge-blue">Optional</span></div>
           <div class="note" style="margin-bottom:10px">Normal analysis is complete. If Local AI is enabled, use it to improve only the selected report output — the full book is not sent to the model.</div>
@@ -626,6 +644,14 @@
           <div id="unknownWordCloud" class="word-cloud"></div>
         </div>
 
+        <div class="card" id="unknownReviewCard" style="display:none">
+          <div class="card-title">
+            <span>Unknown Words - Estimate & Add to DB</span>
+            <span id="unknownReviewCount" class="badge badge-amber">0 words</span>
+          </div>
+          <div id="unknownReviewContent"></div>
+        </div>
+
         <div class="card" id="tamilFeaturesCard" style="display:none">
           <div class="card-title">
             <span>Tamil Features Analysis</span>
@@ -699,6 +725,21 @@
 
         <!-- 1. Verdict banner -->
         <div class="card" id="checkerVerdict"></div>
+
+        <div class="card" id="checkerTaviCard" style="display:none">
+          <div class="card-title">TAVI - Tamil Adaptive Vocabulary Index</div>
+          <div id="checkerTaviContent"></div>
+        </div>
+
+        <div class="card" id="checkerNormsCard" style="display:none">
+          <div class="card-title">Grade-Level Sentence & Paragraph Norms</div>
+          <div id="checkerNormsContent"></div>
+        </div>
+
+        <div class="card" id="checkerMeaningCard" style="display:none">
+          <div class="card-title">Meaning-Level Review</div>
+          <div id="checkerMeaningContent"></div>
+        </div>
 
         <!-- 2. Highlighted paragraph -->
         <div class="card">
@@ -892,7 +933,7 @@
 
       <div class="card">
         <div class="card-title">Teacher Setup</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px">
           <div class="form-row">
             <label>Student name</label>
             <input id="readingStudent" class="input" placeholder="Optional">
@@ -914,6 +955,13 @@
               <option value="gentle" selected>Gentle</option>
               <option value="normal">Normal</option>
               <option value="strict">Strict</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label>Paragraph source</label>
+            <select id="readingSource" class="input" onchange="loadReadingPassage()">
+              <option value="textbook" selected>Extracted textbooks</option>
+              <option value="default">Built-in samples</option>
             </select>
           </div>
         </div>
@@ -1019,10 +1067,31 @@ export TAMIL_READING_ASR_CMD="/path/to/asr --lang {lang} --audio {wav}"</pre>
           <div id="scoreContent"></div>
         </div>
 
+        <div class="card" id="childLevelCard">
+          <div class="card-title">Children-book class-level signals</div>
+          <div id="childLevelContent"></div>
+        </div>
+
         <!-- Content age flags -->
         <div class="card" id="flagsCard">
           <div class="card-title">Content age-appropriateness</div>
           <div id="flagsContent"></div>
+        </div>
+
+        <div class="card" id="corpusCard">
+          <div class="card-title">
+            <span>TAVI - Tamil Adaptive Vocabulary Index</span>
+            <button class="btn btn-sm" onclick="buildTamilCorpus()">Build / refresh corpus</button>
+          </div>
+          <div id="corpusContent"></div>
+        </div>
+
+        <div class="card" id="normsCard">
+          <div class="card-title">
+            <span>Grade-Level Sentence & Paragraph Norms</span>
+            <button class="btn btn-sm" onclick="buildLevelNorms()">Build / refresh norms</button>
+          </div>
+          <div id="normsContent"></div>
         </div>
 
         <!-- Metrics grid -->
@@ -1406,11 +1475,14 @@ export TAMIL_READING_ASR_CMD="/path/to/asr --lang {lang} --audio {wav}"</pre>
           <div class="card-title">Import from Tamil Wikipedia</div>
           <p class="note">Downloads the Tamil Wikipedia data dump (one time, ~30 MB for abstracts). 
           Extracts Tamil vocabulary and infers grade levels from co-occurrence with your textbook words.
-          Requires internet connection for the download only — processing is fully offline.</p>
+          Requires internet connection for the download only — processing is fully offline. Wikipedia is now stored in a separate database from the textbook analyzer database.</p>
+          <div id="wikiStatsBox" class="info-box" style="margin-top:10px">Loading Wikipedia corpus stats…</div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:10px">
             <button class="btn btn-sm" onclick="downloadWiki('abstracts')">⬇ Abstracts (~30 MB, fast)</button>
             <button class="btn btn-sm" onclick="downloadWiki('wiktionary')">⬇ Wiktionary (definitions)</button>
             <button class="btn btn-sm" onclick="downloadWiki('full')">⬇ Full Wikipedia (~500 MB)</button>
+            <button class="btn btn-sm" onclick="rebuildWikiDb()">Build separate Wiki DB from downloaded dump</button>
+            <button class="btn btn-sm" onclick="estimateWikiGrades()">Estimate Wiki grade levels</button>
             <span id="wikiDownloadStatus" style="font-size:12px;color:var(--text3)"></span>
           </div>
           <div id="wikiProgressWrap" style="display:none;margin-top:10px">
@@ -1583,6 +1655,227 @@ function applyRoleUI(){ const role=getCurrentRole(); const sel=document.getEleme
 function renderHomeForRole(){ const cfg=ROLE_CONFIG[getCurrentRole()] || ROLE_CONFIG.author; const badge=document.getElementById('homeRoleBadge'); if(!badge) return; badge.textContent=`${cfg.icon} ${cfg.badge}`; document.getElementById('homeTitle').textContent=cfg.title; document.getElementById('homeSubtitle').textContent=cfg.subtitle; document.getElementById('homeActions').innerHTML=cfg.actions.map(a=>`<button class="btn ${a[2]}" onclick="showPage('${a[1]}')">${a[0]}</button>`).join(''); document.getElementById('homeFeatureGrid').innerHTML=cfg.features.map(f=>`<div class="feature-card" onclick="showPage('${f[3]}')"><div class="feature-icon">${f[0]}</div><div class="feature-title">${f[1]}</div><div class="feature-sub">${f[2]}</div></div>`).join(''); }
 async function loadHomeMetrics(){ try{ const res=await fetch('/api/v27/home_metrics'); const m=await res.json(); if(m.error) throw new Error(m.error); const fmt=n=>Number(n||0).toLocaleString(); const wikiLabel=m.wikipedia_words?fmt(m.wikipedia_words):'Not imported'; document.getElementById('homeMetricsRow').innerHTML=`<div class="metric"><div class="metric-label">Books loaded</div><div class="metric-value teal">${fmt(m.books_loaded)}</div></div><div class="metric"><div class="metric-label">Grade words</div><div class="metric-value">${fmt(m.total_grade_words)}</div></div><div class="metric"><div class="metric-label">Wikipedia words</div><div class="metric-value purple">${wikiLabel}</div></div><div class="metric"><div class="metric-label">Reports saved</div><div class="metric-value">${fmt(m.analyses_saved)}</div></div>`; const byGrade={}; (m.grades||[]).forEach(g=>byGrade[g.grade]=g); document.getElementById('homeGradeMeter').innerHTML=Array.from({length:12},(_,i)=>{ const g=i+1,row=byGrade[g],words=row?row.word_count||0:0,files=row?row.file_count||0:0; return `<div class="grade-meter-cell ${words?'loaded':''}"><b>${g}</b><span>${words?fmt(words)+'w':'empty'}</span><span>${files?files+' file'+(files>1?'s':''):''}</span></div>`; }).join(''); const wikiStatus=m.wikipedia_words?`Wikipedia KB: ${fmt(m.wikipedia_words)} words, ${fmt(m.wikipedia_articles)} articles.`:'Wikipedia KB: not imported yet. Admin can import tamil_wikipedia_kb.sqlite later.'; document.getElementById('homeOfflineStatus').innerHTML=`<b>Offline/no-AI ready.</b> ${wikiStatus}<br>Word library: ${fmt(m.word_library_words)} words. Cache: ${fmt(m.cache_files)} files (${m.cache_size_mb||0} MB). Meaning KB files: ${fmt(m.meaning_kb_files)}.`; }catch(e){ const el=document.getElementById('homeOfflineStatus'); if(el) el.textContent='Could not load metrics: '+e.message; } }
 function renderV27Offline(data){ const card=document.getElementById('v27OfflineCard'); const body=document.getElementById('v27OfflineContent'); const v=data&&data.v27; if(!card||!body||!v||!v.enabled){ if(card) card.style.display='none'; return; } card.style.display='block'; const lp=v.lesson_plan||{}; const clusters=(v.concept_clusters||[]).slice(0,5).map(c=>`<div class="word-chip"><b>${c.label}</b>: ${c.words.slice(0,6).map(w=>w.word).join(', ')}</div>`).join(''); const glossary=(v.smart_glossary||[]).slice(0,12).map(g=>`<tr><td>${g.word}</td><td>${g.meaning}</td><td>${g.class_level?'Std '+g.class_level:'—'}</td></tr>`).join(''); const rewrites=(v.rewrite_suggestions||[]).slice(0,8).map(r=>`<li><b>${r.type==='split_sentence'?'Split sentence':(r.word||'Explain word')}:</b> ${r.reason||''} ${r.suggestion||''}</li>`).join(''); body.innerHTML=`<div class="v27-grid" style="margin-bottom:12px"><div class="metric"><div class="metric-label">Reading difficulty</div><div class="v27-score">${v.difficulty_score_10}/10</div><div class="note">${v.difficulty_label}</div></div><div class="metric"><div class="metric-label">Teacher support</div><div class="metric-value ${v.support_level==='Low'?'teal':''}">${v.support_level}</div><div class="note">Independent reading: ${v.independent_reading?'Yes':'Needs support'}</div></div><div class="metric"><div class="metric-label">Recommended class</div><div class="metric-value teal">Std ${v.recommended_grade}</div><div class="note">Offline rule-based intelligence</div></div></div><div class="card" style="margin-bottom:10px"><div class="card-title">Teacher lesson plan</div><b>Before:</b><ul>${(lp.before_reading||[]).map(x=>`<li>${x}</li>`).join('')}</ul><b>During:</b><ul>${(lp.during_reading||[]).map(x=>`<li>${x}</li>`).join('')}</ul><b>After:</b><ul>${(lp.after_reading||[]).map(x=>`<li>${x}</li>`).join('')}</ul></div><div class="card" style="margin-bottom:10px"><div class="card-title">Concept clusters</div><div class="word-cloud">${clusters||'<span class="note">No major clusters detected.</span>'}</div></div><div class="card" style="margin-bottom:10px"><div class="card-title">Author suggestions</div><ul>${rewrites||'<li>No major rewrite issues detected.</li>'}</ul></div><div class="table-wrap"><table><thead><tr><th>Glossary word</th><th>Simple meaning/support</th><th>Level</th></tr></thead><tbody>${glossary||'<tr><td colspan="3">No glossary candidates found.</td></tr>'}</tbody></table></div>`; }
+
+function renderTamilContextReport(tc, targetId, compact=false) {
+  const el = document.getElementById(targetId);
+  if (!el) return false;
+  if (!tc || !tc.enabled) {
+    el.innerHTML = `
+      <div class="info-box">
+        ${tc && (tc.message || tc.error) ? (tc.message || tc.error) : 'Tamil corpus has not been built yet.'}
+        <div style="margin-top:8px"><button class="btn btn-sm" onclick="buildTamilCorpus()">Build / refresh Tamil corpus</button></div>
+      </div>`;
+    return false;
+  }
+  const taviScore = tc.tavi_score ?? tc.score;
+  const taviLabel = tc.tavi_label || tc.label || '';
+  const scoreColor = taviScore >= 78 ? 'var(--teal-dark)' : taviScore >= 58 ? 'var(--amber)' : 'var(--red)';
+  const band = tc.best_corpus_band ? tc.best_corpus_band.band.replaceAll('_', ' ') : '—';
+  const sources = Object.entries(tc.corpus_sources || {}).map(([k,v]) => `${k}: ${v}`).join(' · ') || 'local corpus';
+  const comp = tc.score_components || {};
+  const level = tc.estimated_level || {};
+  const morph = tc.morphology || {};
+  const bands = (tc.band_matches || []).map(b => `
+    <tr><td>${b.band.replaceAll('_',' ')}</td><td>${b.known_unique_pct}%</td><td>${b.known_unique}/${b.total_unique}</td></tr>
+  `).join('');
+  const rare = (tc.rare_examples || []).slice(0, compact ? 12 : 30).map(w => `<span class="word-chip">${w.stem}</span>`).join('');
+  const morphKnown = (morph.known_by_parts_examples || []).slice(0, compact ? 8 : 16).map(w =>
+    `<span class="word-chip">${w.word}<small style="color:var(--text3)"> base: ${w.known_base}</small></span>`
+  ).join('');
+  const morphProper = (morph.proper_noun_examples || []).slice(0, compact ? 8 : 16).map(w =>
+    `<span class="word-chip">${w.word}<small style="color:var(--text3)"> ${((w.proper_noun_reasons || [])[0]) || 'possible name'}</small></span>`
+  ).join('');
+  const morphUnknown = (morph.unknown_root_examples || []).slice(0, compact ? 8 : 16).map(w =>
+    `<span class="word-chip">${w.word}</span>`
+  ).join('');
+  el.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px">
+      <div class="metric"><div class="metric-label">Estimated reading level</div><div class="metric-value teal" style="font-size:20px">${level.estimated_standard_range || '—'}</div><div class="note">${level.confidence || '—'} confidence</div></div>
+      <div class="metric"><div class="metric-label">TAVI score</div><div class="metric-value" style="color:${scoreColor}">${taviScore}</div><div class="note">${taviLabel}</div></div>
+      <div class="metric"><div class="metric-label">Corpus-known words</div><div class="metric-value teal">${tc.word_familiarity_pct}%</div></div>
+      <div class="metric"><div class="metric-label">Rare/unknown words</div><div class="metric-value ${tc.rare_or_unknown_pct > 18 ? 'red' : ''}">${tc.rare_or_unknown_pct}%</div></div>
+      <div class="metric"><div class="metric-label">Known by Tamil parts</div><div class="metric-value teal">${tc.known_by_parts_pct ?? morph.known_by_parts_pct ?? 0}%</div></div>
+      <div class="metric"><div class="metric-label">Compound density</div><div class="metric-value">${tc.compound_word_pct}%</div></div>
+      <div class="metric"><div class="metric-label">Formal word density</div><div class="metric-value">${tc.formal_word_pct}%</div></div>
+      <div class="metric"><div class="metric-label">Avg sentence</div><div class="metric-value">${tc.avg_sentence_words}</div></div>
+      <div class="metric"><div class="metric-label">Corpus size</div><div class="metric-value">${(tc.corpus_tokens || 0).toLocaleString()}</div></div>
+      <div class="metric"><div class="metric-label">Wiki corpus stems</div><div class="metric-value">${(tc.wiki_corpus_stems || 0).toLocaleString()}</div></div>
+    </div>
+    <div class="info-box" style="margin-bottom:12px">
+      <b>Estimated reading level:</b> ${level.estimated_standard_range || '—'}
+      ${level.estimated_standard ? `(approx. Std ${level.estimated_standard})` : ''}
+      <div style="margin-top:6px;font-size:12px;color:var(--text2)">
+        ${(level.reasons || []).slice(0, 3).join(' ')}
+      </div>
+      <div style="margin-top:6px;font-size:12px;color:var(--text3)">
+        This is separate from textbook-based Best-fit Standard and should be treated as approximate.
+      </div>
+    </div>
+    <div class="info-box" style="margin-bottom:12px">
+      <b>${tc.metric_full_name || 'Tamil Adaptive Vocabulary Index'}:</b>
+      ${tc.method || 'Corpus familiarity, rare-word penalty, sentence load, and Tamil morphology/formality load.'}
+      <div style="margin-top:8px;font-size:12px;color:var(--text2)">
+        Components: vocabulary ${comp.vocabulary_ease ?? '—'}, sentence ${comp.sentence_ease ?? '—'}, morphology ${comp.morphology_ease ?? '—'}.
+      </div>
+      <div style="margin-top:6px;font-size:12px;color:var(--text3)">
+        Nearest corpus sample: ${band}. This is only a diagnostic, not the level recommendation.
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:12px">
+      <div class="card-title">Tamil morphology and nouns</div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:10px">
+        <div class="metric"><div class="metric-label">Inflected/extended words</div><div class="metric-value">${morph.inflected_word_pct ?? 0}%</div><div class="note">${morph.inflected_word_count || 0} words</div></div>
+        <div class="metric"><div class="metric-label">Known after endings</div><div class="metric-value teal">${morph.known_by_parts_count || 0}</div><div class="note">Base form found</div></div>
+        <div class="metric"><div class="metric-label">Possible names/places</div><div class="metric-value">${morph.possible_proper_noun_count || 0}</div><div class="note">Do not grade as normal vocabulary blindly</div></div>
+        <div class="metric"><div class="metric-label">Unknown roots</div><div class="metric-value ${morph.unknown_root_count ? 'red' : ''}">${morph.unknown_root_count || 0}</div><div class="note">Need corpus/glossary review</div></div>
+      </div>
+      <details>
+        <summary style="font-size:13px;color:var(--text2);cursor:pointer">Morphology examples</summary>
+        <div style="margin-top:10px">
+          <div class="note" style="margin-bottom:5px">Known by base/parts</div>
+          <div class="word-cloud" style="margin-bottom:8px">${morphKnown || '<span class="note">No base-form matches found.</span>'}</div>
+          <div class="note" style="margin-bottom:5px">Possible proper nouns</div>
+          <div class="word-cloud" style="margin-bottom:8px">${morphProper || '<span class="note">No strong name/place patterns found.</span>'}</div>
+          <div class="note" style="margin-bottom:5px">Unknown roots</div>
+          <div class="word-cloud">${morphUnknown || '<span class="note">No unknown roots found.</span>'}</div>
+        </div>
+      </details>
+      <p class="note" style="margin-top:8px">${morph.note || 'Tamil noun endings and possible proper nouns are handled with rule-based heuristics.'}</p>
+    </div>
+    <details style="margin-bottom:12px">
+      <summary style="font-size:13px;color:var(--text2);cursor:pointer">Corpus diagnostics</summary>
+      <div class="table-wrap" style="margin-top:8px"><table><thead><tr><th>Corpus sample</th><th>Unique word match</th><th>Known / total</th></tr></thead><tbody>${bands || '<tr><td colspan="3">No band data found.</td></tr>'}</tbody></table></div>
+    </details>
+    <div class="card" style="margin-bottom:10px"><div class="card-title">TAVI suggestions</div><ul>${(tc.suggestions || []).map(s => `<li>${s}</li>`).join('')}</ul></div>
+    <div class="word-cloud">${rare || '<span class="note">No rare corpus words found.</span>'}</div>
+    <p class="note">Corpus source files: ${sources}. This report is additional to the existing grade, meaning, and analytics reports.</p>`;
+  return true;
+}
+
+function renderLevelNormsReport(norms, targetId='normsContent') {
+  const el = document.getElementById(targetId);
+  if (!el) return false;
+  if (!norms || !norms.enabled) {
+    el.innerHTML = `
+      <div class="info-box">
+        ${norms && (norms.message || norms.error) ? (norms.message || norms.error) : 'Grade-level norms database has not been built yet.'}
+        <div style="margin-top:8px"><button class="btn btn-sm" onclick="buildLevelNorms()">Build / refresh norms</button></div>
+      </div>`;
+    return false;
+  }
+  const t = norms.target || {};
+  const n = norms.norm || {};
+  const grade = norms.compare_grade || n.grade || '—';
+  const sentWarn = (norms.sentence_over_p90_pct || 0) > 20;
+  const paraWarn = (norms.paragraph_over_p90_pct || 0) > 20;
+  const coverageWarning = norms.coverage_warning ? `<div class="info-box" style="margin-bottom:12px">${escapeHtml(norms.coverage_warning)}</div>` : '';
+  el.innerHTML = `
+    ${coverageWarning}
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px">
+      <div class="metric"><div class="metric-label">Compared with</div><div class="metric-value teal">Std ${grade}</div><div class="note">Textbook norms · ${norms.confidence || 'Medium'} confidence</div></div>
+      <div class="metric"><div class="metric-label">Avg sentence</div><div class="metric-value">${t.avg_sentence_words ?? '—'}</div><div class="note">Norm: ${n.avg_sentence_words ?? '—'}</div></div>
+      <div class="metric"><div class="metric-label">Sentences over p90</div><div class="metric-value ${sentWarn ? 'red' : ''}">${norms.sentence_over_p90_pct || 0}%</div><div class="note">${norms.sentence_over_p90_count || 0} sentence(s)</div></div>
+      <div class="metric"><div class="metric-label">Paragraphs over p90</div><div class="metric-value ${paraWarn ? 'red' : ''}">${norms.paragraph_over_p90_pct || 0}%</div><div class="note">${norms.paragraph_over_p90_count || 0} paragraph(s)</div></div>
+      <div class="metric"><div class="metric-label">Avg paragraph</div><div class="metric-value">${t.avg_paragraph_words ?? '—'}</div><div class="note">Norm: ${n.avg_paragraph_words ?? '—'}</div></div>
+      <div class="metric"><div class="metric-label">P90 sentence</div><div class="metric-value">${t.p90_sentence_words ?? '—'}</div><div class="note">Norm: ${n.p90_sentence_words ?? '—'}</div></div>
+      <div class="metric"><div class="metric-label">P90 paragraph</div><div class="metric-value">${t.p90_paragraph_words ?? '—'}</div><div class="note">Norm: ${n.p90_paragraph_words ?? '—'}</div></div>
+      <div class="metric"><div class="metric-label">Source DB</div><div class="metric-value" style="font-size:12px">${norms.database || 'data/level_norms.db'}</div></div>
+    </div>
+    <p class="note">This compares the target text against sentence and paragraph norms derived from your loaded textbooks. It does not require children’s books or teacher-labelled passages.</p>`;
+  return true;
+}
+
+function renderChildLevelFeatureReport(clf, targetId='bookChildLevelContent', compact=true) {
+  const el = document.getElementById(targetId);
+  if (!el) return false;
+  if (!clf || !clf.enabled) {
+    el.innerHTML = `<div class="info-box">${clf && (clf.message || clf.error) ? escapeHtml(clf.message || clf.error) : 'Children-book feature signals are not available for this analysis.'}</div>`;
+    return false;
+  }
+  const s = clf.signals || {};
+  const score = Number(clf.difficulty_score || 0);
+  const scoreColor = score <= 32 ? 'var(--teal-dark)' : score <= 66 ? 'var(--amber)' : 'var(--red)';
+  const tech = (clf.technical_phrases || []).slice(0, compact ? 8 : 16).map(h =>
+    `<span class="word-chip">${escapeHtml(h.phrase)} <small style="color:var(--text3)">Std ${h.level}</small></span>`
+  ).join('');
+  const names = (clf.proper_noun_phrases || []).slice(0, compact ? 10 : 20).map(w =>
+    `<span class="word-chip">${escapeHtml(w)}</span>`
+  ).join('');
+  const topics = (clf.topics || []).slice(0, compact ? 5 : 8).map(t =>
+    `<span class="word-chip">${escapeHtml(t.label)} <small style="color:var(--text3)">${escapeHtml(t.level || '')}</small></span>`
+  ).join('');
+  el.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px">
+      <div class="metric"><div class="metric-label">Feature estimate</div><div class="metric-value teal">${escapeHtml(clf.estimated_band || '—')}</div><div class="note">Approx. Std ${clf.estimated_standard || '—'}</div></div>
+      <div class="metric"><div class="metric-label">Difficulty signal</div><div class="metric-value" style="color:${scoreColor}">${score}</div><div class="note">0 easy, 100 hard</div></div>
+      <div class="metric"><div class="metric-label">Technical phrases</div><div class="metric-value">${s.technical_phrase_count ?? 0}</div></div>
+      <div class="metric"><div class="metric-label">Name phrases</div><div class="metric-value">${s.proper_noun_phrase_count ?? 0}</div></div>
+      <div class="metric"><div class="metric-label">Avg sentence</div><div class="metric-value">${s.avg_sentence_words ?? '—'}</div></div>
+      <div class="metric"><div class="metric-label">True compounds</div><div class="metric-value">${s.compound_word_pct ?? '—'}%</div></div>
+      <div class="metric"><div class="metric-label">Dates / time</div><div class="metric-value">${s.date_time_count ?? 0}</div></div>
+      <div class="metric"><div class="metric-label">Dialogue support</div><div class="metric-value">${s.short_line_pct ?? '—'}%</div><div class="note">Short-line signal</div></div>
+    </div>
+    <div class="info-box" style="margin-bottom:12px">${(clf.reasons || []).slice(0, compact ? 4 : 6).map(escapeHtml).join(' ')}</div>
+    <div style="margin-bottom:10px"><b>Topic clues</b><div class="word-cloud">${topics || '<span class="note">No strong topic clues detected.</span>'}</div></div>
+    <div style="margin-bottom:10px"><b>Technical phrases</b><div class="word-cloud">${tech || '<span class="note">None detected.</span>'}</div></div>
+    <div><b>Name/place phrases</b><div class="word-cloud">${names || '<span class="note">None detected.</span>'}</div></div>`;
+  return true;
+}
+
+function maybeShowAIEnrichment(data) {
+  const card = document.getElementById('aiEnrichmentCard');
+  const status = document.getElementById('aiEnrichmentStatus');
+  const output = document.getElementById('aiEnrichmentOutput');
+  if (!card) return;
+  if (!data || !data.analysis_id) {
+    card.style.display = 'none';
+    return;
+  }
+  card.style.display = 'block';
+  if (status) status.textContent = 'Optional. Uses Local AI only if it is enabled in Settings.';
+  if (output) {
+    output.style.display = 'none';
+    output.textContent = '';
+  }
+}
+
+async function runAnalysisAIEnrichment(mode='author') {
+  const aid = (currentAnalysis && currentAnalysis.analysis_id) || _currentAnalysisId;
+  const status = document.getElementById('aiEnrichmentStatus');
+  const output = document.getElementById('aiEnrichmentOutput');
+  if (!aid) {
+    toast('Run a book analysis first.');
+    return;
+  }
+  if (status) status.textContent = 'Running Local AI enrichment...';
+  if (output) {
+    output.style.display = 'none';
+    output.textContent = '';
+  }
+  try {
+    const res = await fetch('/api/ai/enrich_analysis', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({analysis_id: aid, mode})
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      const msg = data.details || data.error || 'Local AI enrichment failed';
+      if (status) status.textContent = msg;
+      toast(msg, 6000);
+      return;
+    }
+    if (status) status.textContent = `${data.cached ? 'Loaded cached' : 'Generated'} ${mode} suggestions with ${data.model || 'Local AI'}.`;
+    if (output) {
+      output.textContent = data.result || '';
+      output.style.display = 'block';
+    }
+  } catch(e) {
+    const msg = e && e.message ? e.message : String(e || 'Local AI enrichment failed');
+    if (status) status.textContent = msg;
+    toast(msg, 6000);
+  }
+}
 
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
@@ -2174,11 +2467,12 @@ function resetAnalyze() {
 
 async function runExtract() {
   if (!targetFile) return;
-  if (!Object.keys(gradesMeta).length) { toast('Upload school books first'); showPage('database'); return; }
   document.getElementById('extractBtn').disabled = true;
   document.getElementById('progressBar').style.display = 'block';
   document.getElementById('progressFill').style.width = '15%';
-  document.getElementById('statusMsg').textContent = 'Extracting Tamil words…';
+  document.getElementById('statusMsg').textContent = Object.keys(gradesMeta).length
+    ? 'Extracting Tamil words…'
+    : 'Extracting Tamil words… No textbook DB loaded, so the result will use offline fallback analysis.';
 
   const fd = new FormData();
   fd.append('file', targetFile);
@@ -2203,7 +2497,8 @@ async function runExtract() {
     document.getElementById('progressBar').style.display = 'none';
     setStep(2);
   } catch(e) {
-    document.getElementById('statusMsg').textContent = 'Extraction failed.';
+    console.error('Extraction failed', e);
+    document.getElementById('statusMsg').textContent = 'Extraction failed: ' + (e && e.message ? e.message : e);
     document.getElementById('extractBtn').disabled = false;
   }
 }
@@ -2368,11 +2663,14 @@ async function _doAnalyze(pendingId, properNounStems) {
     
     // Load Tamil Features if checkbox is enabled
     if (document.getElementById('analyzeDetailedFeatures').checked) {
-      await loadDetailedAnalysis(pendingData.text || '');
+      await loadDetailedAnalysis(pendingData.raw_text || pendingData.text || '');
     }
   } catch(e) {
+    console.error('Analysis failed', e);
     setLoading(false);
-    toast('Analysis failed');
+    const msg = e && e.message ? e.message : String(e || 'unknown error');
+    document.getElementById('statusMsg').textContent = 'Analysis failed: ' + msg;
+    toast('Analysis failed: ' + msg, 6000);
   }
 }
 
@@ -2383,6 +2681,7 @@ function renderResults(data) {
 
   // Metric cards
   document.getElementById('metricsRow').innerHTML = `
+    <div class="metric"><div class="metric-label">Analysis basis</div><div class="metric-value ${data.grade_database_loaded === false ? 'orange' : 'teal'}" style="font-size:16px">${data.grade_database_loaded === false ? 'Estimated' : 'Textbook DB'}</div><div class="note">${escapeHtml(data.analysis_basis || '')}</div></div>
     <div class="metric"><div class="metric-label">Total words</div><div class="metric-value">${data.total_words.toLocaleString()}</div></div>
     <div class="metric"><div class="metric-label">Unique stems</div><div class="metric-value">${data.stems_analyzed.toLocaleString()}</div></div>
     <div class="metric"><div class="metric-label">Proper nouns (as known)</div><div class="metric-value purple">${pnCount}</div></div>
@@ -2584,8 +2883,24 @@ function renderResults(data) {
     `<option value="${r.grade}">Standard ${r.grade} (${r.unknown_words} unknown)</option>`
   ).join('');
   showUnknownWords();
+  renderUnknownReview(data);
 
   renderV27Offline(data);
+  const tcCard = document.getElementById('tamilContextCard');
+  if (tcCard) {
+    tcCard.style.display = 'block';
+    renderTamilContextReport(data.analytics && data.analytics.tamil_context, 'tamilContextContent', true);
+  }
+  const bookNormsCard = document.getElementById('bookNormsCard');
+  if (bookNormsCard) {
+    bookNormsCard.style.display = 'block';
+    renderLevelNormsReport(data.analytics && data.analytics.level_norms, 'bookNormsContent');
+  }
+  const bookChildCard = document.getElementById('bookChildLevelCard');
+  if (bookChildCard) {
+    bookChildCard.style.display = 'block';
+    renderChildLevelFeatureReport(data.analytics && data.analytics.child_level_features, 'bookChildLevelContent', true);
+  }
   maybeShowAIEnrichment(data);
 
   document.getElementById('exportBtn').dataset.id = data.analysis_id;
@@ -2604,6 +2919,78 @@ function showUnknownWords() {
   cloud.innerHTML = row.unknown_word_list.map(w => `<span class="word-chip">${w}</span>`).join('');
 }
 
+function renderUnknownReview(data) {
+  const card = document.getElementById('unknownReviewCard');
+  const body = document.getElementById('unknownReviewContent');
+  const count = document.getElementById('unknownReviewCount');
+  if (!card || !body) return;
+  const details = data.unknown_word_details || [];
+  if (!details.length) {
+    card.style.display = 'none';
+    return;
+  }
+  card.style.display = 'block';
+  if (count) count.textContent = `${details.length} words`;
+  const rows = details.slice(0, 250).map((w, i) => {
+    const srcLabel = w.source === 'wikipedia' ? 'Wikipedia' : 'Book estimate';
+    const conf = w.confidence === null || w.confidence === undefined
+      ? ''
+      : ` · ${Math.round(Number(w.confidence || 0) * 100)}%`;
+    const gradeOptions = Array.from({length:12}, (_, n) => {
+      const g = n + 1;
+      return `<option value="${g}" ${Number(w.suggested_grade) === g ? 'selected' : ''}>Std ${g}</option>`;
+    }).join('');
+    return `<tr id="unknownReviewRow${i}">
+      <td><b>${escapeHtml(w.word || w.stem)}</b><div class="note">${escapeHtml(w.stem || '')}</div></td>
+      <td>${Number(w.frequency || 0).toLocaleString()}</td>
+      <td><select class="mini-input" id="unknownGrade${i}">${gradeOptions}</select></td>
+      <td><span class="badge ${w.source === 'wikipedia' ? 'badge-blue' : 'badge-amber'}">${srcLabel}</span><div class="note">${escapeHtml(w.reason || '')}${conf}</div></td>
+      <td><input class="mini-input" id="unknownDef${i}" placeholder="Definition optional"></td>
+      <td><button class="btn btn-sm btn-primary" id="unknownAdd${i}" onclick="addUnknownWordToDb(${i})">Add</button></td>
+    </tr>`;
+  }).join('');
+  body.innerHTML = `
+    <p class="note" style="margin-top:0">These words were not found in the loaded textbook grade database. Wikipedia estimates are approximate; book estimates are low-confidence and should be teacher-confirmed before adding.</p>
+    <div class="table-wrap"><table><thead><tr><th>Word</th><th>In book</th><th>Standard</th><th>Estimate source</th><th>Definition</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+    ${details.length > 250 ? `<p class="note" style="margin-top:8px">Showing first 250 of ${details.length} unknown words.</p>` : ''}`;
+}
+
+async function addUnknownWordToDb(index) {
+  if (!currentAnalysis || !currentAnalysis.unknown_word_details) return;
+  const item = currentAnalysis.unknown_word_details[index];
+  if (!item) return;
+  const grade = parseInt(document.getElementById(`unknownGrade${index}`).value);
+  const definition = document.getElementById(`unknownDef${index}`).value.trim();
+  const btn = document.getElementById(`unknownAdd${index}`);
+  if (btn) { btn.disabled = true; btn.textContent = 'Adding...'; }
+  const r = await fetch('/api/library/manual', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({
+      stem: item.stem,
+      display_word: item.word || item.stem,
+      grade_level: grade,
+      definition: definition || null,
+      example: `Added from analysis: ${currentAnalysis.book_name || 'book'}`,
+      sync_to_analyzer: true
+    })
+  });
+  const d = await r.json();
+  if (d.error) {
+    toast(d.error);
+    if (btn) { btn.disabled = false; btn.textContent = 'Add'; }
+    return;
+  }
+  const row = document.getElementById(`unknownReviewRow${index}`);
+  if (row) row.style.opacity = '0.55';
+  if (btn) {
+    btn.textContent = 'Added';
+    btn.classList.remove('btn-primary');
+  }
+  toast(`${item.word || item.stem} added at Std ${grade}`);
+  loadLibStats();
+}
+
 function exportExcel() {
   const id = document.getElementById('exportBtn').dataset.id;
   if (id) window.location.href = `/api/export/${id}`;
@@ -2612,6 +2999,64 @@ function exportExcel() {
 function generateReport() {
   const id = document.getElementById('exportBtn').dataset.id;
   if (id) window.location.href = `/api/report/${id}`;
+}
+
+async function buildTamilCorpus() {
+  const targets = ['corpusContent', 'tamilContextContent'];
+  targets.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = '<div class="status-msg">Building Tamil corpus from local textbook/corpus text files...</div>';
+  });
+  try {
+    const res = await fetch('/api/corpus/build', {method:'POST'});
+    const d = await res.json();
+    if (!res.ok || d.error) throw new Error(d.error || 'Corpus build failed');
+    toast(`TAVI corpus built: ${(d.tokens || 0).toLocaleString()} words from ${d.documents || 0} files`);
+    const html = `
+      <div class="info-box">
+        Tamil corpus built successfully: <b>${(d.tokens || 0).toLocaleString()}</b> words,
+        <b>${(d.unique_stems || 0).toLocaleString()}</b> unique stems,
+        <b>${d.documents || 0}</b> source files.
+        Analyze a book again to attach the refreshed TAVI report.
+      </div>`;
+    targets.forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = html; });
+  } catch (e) {
+    targets.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = `<div class="info-box" style="border-color:#efb0aa;color:var(--red);background:var(--red-light)">${e.message}</div>`;
+    });
+  }
+}
+
+async function buildLevelNorms() {
+  const targets = ['normsContent', 'checkerNormsContent', 'bookNormsContent'];
+  targets.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = '<div class="status-msg">Building grade-level sentence and paragraph norms from loaded textbooks...</div>';
+  });
+  try {
+    const res = await fetch('/api/norms/build', {method:'POST'});
+    const d = await res.json();
+    if (!res.ok || d.error) throw new Error(d.error || 'Norm build failed');
+    toast(`Level norms built: ${d.grade_count || 0} grades, ${(d.sentences || 0).toLocaleString()} sentences`);
+    const grades = (d.grades || []).map(g =>
+      `<span class="word-chip">Std ${g.grade}: ${Number(g.sentence_count || 0).toLocaleString()} sentences · ${Number(g.paragraph_count || 0).toLocaleString()} paragraphs</span>`
+    ).join('');
+    const html = `
+      <div class="info-box">
+        Grade-level norms built successfully from <b>${d.source_files || 0}</b> textbook file(s):
+        <b>${(d.sentences || 0).toLocaleString()}</b> sentences and
+        <b>${(d.paragraphs || 0).toLocaleString()}</b> paragraphs.
+        Analyze a book/text again to attach the refreshed norms report.
+      </div>
+      <div class="word-cloud">${grades}</div>`;
+    targets.forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = html; });
+  } catch (e) {
+    targets.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = `<div class="info-box" style="border-color:#efb0aa;color:var(--red);background:var(--red-light)">${e.message}</div>`;
+    });
+  }
 }
 
 function renderWordDistribution(data) {
@@ -2912,6 +3357,18 @@ function renderCheckerResults(data) {
       </div>
     </div>`;
 
+  const taviCard = document.getElementById('checkerTaviCard');
+  if (taviCard) {
+    taviCard.style.display = 'block';
+    renderTamilContextReport(data.tamil_context, 'checkerTaviContent', true);
+  }
+  const normsCard = document.getElementById('checkerNormsCard');
+  if (normsCard) {
+    normsCard.style.display = 'block';
+    renderLevelNormsReport(data.level_norms, 'checkerNormsContent');
+  }
+  renderCheckerMeaning(data.meaning);
+
   // 2. Highlighted paragraph — populate grade filter
   const sel = document.getElementById('highlightGrade');
   sel.innerHTML = '<option value="0">All grades (colour all words)</option>';
@@ -2974,12 +3431,49 @@ function renderCheckerResults(data) {
   const unkCloud = document.getElementById('checkerUnknownCloud');
   if (data.unknown_list && data.unknown_list.length) {
     unkCard.style.display = 'block';
-    unkCloud.innerHTML = data.unknown_list.map(w =>
-      `<span class="word-chip" style="background:#F0E8FB;border-color:#c9a8e8;color:#6c3fa0">${w}</span>`
-    ).join('');
+    const wikiByWord = {};
+    (data.wiki_unknown || []).forEach(w => { wikiByWord[w.word] = w; });
+    const morphByWord = {};
+    const morph = data.morphology || (data.tamil_context && data.tamil_context.morphology) || {};
+    ['known_by_parts_examples', 'proper_noun_examples', 'unknown_root_examples'].forEach(group => {
+      (morph[group] || []).forEach(item => { morphByWord[item.word] = item; });
+    });
+    unkCloud.innerHTML = data.unknown_list.map(w => {
+      const info = wikiByWord[w];
+      const m = morphByWord[w];
+      const hints = [];
+      if (info && info.estimated_grade) hints.push(`Wiki est. Std ${info.estimated_grade}`);
+      if (m && m.known_base) hints.push(`base: ${m.known_base}`);
+      if (m && m.possible_proper_noun) hints.push('possible name/place');
+      const suffix = hints.length ? ` <small style="color:var(--text3)">${hints.join(' · ')}</small>` : '';
+      return `<span class="word-chip" style="background:#F0E8FB;border-color:#c9a8e8;color:#6c3fa0">${w}${suffix}</span>`;
+    }).join('');
   } else {
     unkCard.style.display = 'none';
   }
+}
+
+function renderCheckerMeaning(meaning) {
+  const card = document.getElementById('checkerMeaningCard');
+  const body = document.getElementById('checkerMeaningContent');
+  if (!card || !body) return;
+  if (!meaning || !meaning.enabled) {
+    card.style.display = 'none';
+    return;
+  }
+  card.style.display = 'block';
+  const flags = meaning.flagged || [];
+  const rows = flags.slice(0, 20).map(f =>
+    `<tr><td>${f.item}</td><td>${f.type}</td><td>Std ${f.level}</td><td>${f.severity === 'too_advanced' ? 'Too advanced' : 'Slightly advanced'}</td><td>${f.concept || 'general'}</td></tr>`
+  ).join('');
+  body.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px">
+      <div class="metric"><div class="metric-label">Target meaning level</div><div class="metric-value">Std ${meaning.target_grade}</div></div>
+      <div class="metric"><div class="metric-label">Appropriate</div><div class="metric-value teal">${meaning.appropriateness_pct === null ? '—' : meaning.appropriateness_pct + '%'}</div></div>
+      <div class="metric"><div class="metric-label">Slightly advanced</div><div class="metric-value">${meaning.slightly_advanced_count || 0}</div></div>
+      <div class="metric"><div class="metric-label">Too advanced</div><div class="metric-value red">${meaning.too_advanced_count || 0}</div></div>
+    </div>
+    <div class="table-wrap"><table><thead><tr><th>Word/Phrase</th><th>Type</th><th>Level</th><th>Verdict</th><th>Concept</th></tr></thead><tbody>${rows || '<tr><td colspan="5" style="color:var(--text3)">No meaning-level flags found.</td></tr>'}</tbody></table></div>`;
 }
 
 function renderHighlight(tokens, aboveGrade) {
@@ -3312,6 +3806,50 @@ function renderAnalytics(data, analysisId) {
           </div>`).join('')}
       </div>
       <p class="note" style="margin-top:0.5rem">Score = weighted combination of all readability dimensions. Not a grade predictor — use the comprehension table for that.</p>`;
+  }
+
+  renderTamilContextReport(data.tamil_context, 'corpusContent', false);
+  renderLevelNormsReport(data.level_norms, 'normsContent');
+
+  // ── Children-book class-level signals ─────────────────────────────────────
+  const clf = data.child_level_features;
+  if (clf && clf.enabled) {
+    const s = clf.signals || {};
+    const score = Number(clf.difficulty_score || 0);
+    const scoreColor = score <= 32 ? 'var(--teal-dark)' : score <= 66 ? 'var(--amber)' : 'var(--red)';
+    const topicRows = (clf.topics || []).map(t =>
+      `<tr><td>${escapeHtml(t.label || '')}</td><td>${escapeHtml(t.level || '')}</td><td>${(t.examples || []).slice(0,6).map(escapeHtml).join(', ')}</td></tr>`
+    ).join('');
+    const ex = clf.examples || {};
+    const chips = arr => (arr || []).slice(0,18).map(w => `<span class="word-chip">${escapeHtml(w)}</span>`).join('') || '<span class="note">None detected</span>';
+    document.getElementById('childLevelContent').innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px">
+        <div class="metric"><div class="metric-label">Feature estimate</div><div class="metric-value teal">${escapeHtml(clf.estimated_band || '—')}</div><div class="note">Approx. Std ${clf.estimated_standard || '—'}</div></div>
+        <div class="metric"><div class="metric-label">Difficulty signal</div><div class="metric-value" style="color:${scoreColor}">${score}</div><div class="note">0 easy, 100 hard</div></div>
+        <div class="metric"><div class="metric-label">New words / 100</div><div class="metric-value">${s.new_words_per_100 ?? '—'}</div></div>
+        <div class="metric"><div class="metric-label">Unique words</div><div class="metric-value">${s.unique_word_pct ?? '—'}%</div></div>
+        <div class="metric"><div class="metric-label">Abstract concepts</div><div class="metric-value">${s.abstract_concept_pct ?? '—'}%</div></div>
+        <div class="metric"><div class="metric-label">Long compounds</div><div class="metric-value">${s.compound_word_pct ?? '—'}%</div></div>
+        <div class="metric"><div class="metric-label">Complex sentences</div><div class="metric-value">${s.subordinate_sentence_pct ?? '—'}%</div></div>
+        <div class="metric"><div class="metric-label">Proper-name load</div><div class="metric-value">${s.proper_noun_pct ?? '—'}%</div></div>
+        <div class="metric"><div class="metric-label">Name phrases</div><div class="metric-value">${s.proper_noun_phrase_count ?? 0}</div></div>
+        <div class="metric"><div class="metric-label">Technical phrases</div><div class="metric-value">${s.technical_phrase_count ?? 0}</div></div>
+        <div class="metric"><div class="metric-label">Dates / time</div><div class="metric-value">${s.date_time_count ?? 0}</div></div>
+        <div class="metric"><div class="metric-label">Numbers</div><div class="metric-value">${s.number_count ?? 0}</div></div>
+      </div>
+      <div class="info-box" style="margin-bottom:12px">${(clf.reasons || []).slice(0,4).map(escapeHtml).join(' ')}</div>
+      <details style="margin-bottom:12px">
+        <summary style="font-size:13px;color:var(--text2);cursor:pointer">Topic and example signals</summary>
+        <div class="table-wrap" style="margin-top:8px"><table><thead><tr><th>Topic clue</th><th>Level</th><th>Examples</th></tr></thead><tbody>${topicRows || '<tr><td colspan="3">No strong topic clues detected.</td></tr>'}</tbody></table></div>
+        <div style="margin-top:10px"><b>Technical phrases</b><div class="word-cloud">${(clf.technical_phrases || []).map(h=>`<span class="word-chip">${escapeHtml(h.phrase)} <small style="color:var(--text3)">Std ${h.level}</small></span>`).join('') || '<span class="note">None detected</span>'}</div></div>
+        <div style="margin-top:10px"><b>Name/place phrases</b><div class="word-cloud">${(clf.proper_noun_phrases || []).map(w=>`<span class="word-chip">${escapeHtml(w)}</span>`).join('') || '<span class="note">None detected</span>'}</div></div>
+        <div style="margin-top:10px"><b>Date/number clues</b><div class="word-cloud">${((clf.date_time || {}).examples || []).map(w=>`<span class="word-chip">${escapeHtml(w)}</span>`).join('') || '<span class="note">None detected</span>'}</div></div>
+        <div style="margin-top:10px"><b>Abstract/concept words</b><div class="word-cloud">${chips(ex.abstract_concepts)}</div></div>
+        <div style="margin-top:10px"><b>Long compounds</b><div class="word-cloud">${chips(ex.compound_words)}</div></div>
+        <div style="margin-top:10px"><b>Complex verbs</b><div class="word-cloud">${chips(ex.complex_verbs)}</div></div>
+        <div style="margin-top:10px"><b>Possible names/places</b><div class="word-cloud">${chips(ex.proper_nouns)}</div></div>
+      </details>
+      <p class="note">${escapeHtml(clf.note || '')}</p>`;
   }
 
   // ── Content flags ──────────────────────────────────────────────────────────
@@ -3967,6 +4505,7 @@ const CONCEPT_LABELS = {
 
 async function initLibrary() {
   await loadLibStats();
+  await loadWikiStats();
   await loadLibraryWords();
 }
 
@@ -4010,7 +4549,45 @@ function showLibTab(name) {
     document.getElementById(`libtab-${t}`).classList.toggle('active', t===name);
   });
   if (name === 'browse') loadLibraryWords();
+  if (name === 'add') loadWikiStats();
   if (name === 'sources') loadLibStats();
+}
+
+async function loadWikiStats() {
+  const box = document.getElementById('wikiStatsBox');
+  if (!box) return;
+  try {
+    const r = await fetch('/api/library/wiki_stats');
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    const grades = (d.by_grade || []).map(g =>
+      `<span class="word-chip">Std ${g.grade || '—'}: ${Number(g.cnt || 0).toLocaleString()}</span>`
+    ).join('');
+    const reasons = (d.by_reason || []).slice(0, 5).map(r =>
+      `<span class="word-chip">${(r.reason || 'unknown').replaceAll('_',' ')}: ${Number(r.cnt || 0).toLocaleString()}</span>`
+    ).join('');
+    const imports = (d.imports || []).slice(0, 3).map(i =>
+      `<div style="font-size:11px;color:var(--text3);margin-top:3px">${i.imported_at ? i.imported_at.slice(0,19) : ''} · ${i.stem_count || 0} stems · ${i.article_count || 0} articles</div>`
+    ).join('');
+    const mixed = Number(d.word_library_wikipedia_count || 0);
+    if (!d.total_stems && !mixed) {
+      box.innerHTML = `No Wikipedia corpus loaded yet.<br><span class="note">Database: ${d.database || 'data/wiki_corpus.db'}</span>`;
+      return;
+    }
+    box.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:8px">
+        <div class="metric"><div class="metric-label">Wiki DB stems</div><div class="metric-value">${Number(d.total_stems || 0).toLocaleString()}</div></div>
+        <div class="metric"><div class="metric-label">Wiki tokens</div><div class="metric-value">${Number(d.total_tokens || 0).toLocaleString()}</div></div>
+        <div class="metric"><div class="metric-label">Grade estimated</div><div class="metric-value">${Number(d.estimated_count || 0).toLocaleString()}</div><div class="note">avg confidence ${d.avg_confidence || 0}</div></div>
+        <div class="metric"><div class="metric-label">Database</div><div class="metric-value" style="font-size:12px">${d.database || 'data/wiki_corpus.db'}</div></div>
+      </div>
+      <div class="word-cloud" style="margin-top:0">${grades || '<span class="note">No grade distribution yet.</span>'}</div>
+      <div class="word-cloud" style="margin-top:6px">${reasons || '<span class="note">No estimation reasons yet.</span>'}</div>
+      <div class="note" style="margin-top:6px">Old mixed Wikipedia words in word_library.db: ${mixed.toLocaleString()}. Wiki grades are approximate unless reason is textbook anchor.</div>
+      ${imports || ''}`;
+  } catch(e) {
+    box.innerHTML = `<span style="color:var(--red)">Could not load Wikipedia stats: ${e.message}</span>`;
+  }
 }
 
 async function loadLibraryWords(reset=true) {
@@ -4212,7 +4789,49 @@ async function pollWikiStatus() {
     _wikiPollTimer = null;
     document.getElementById('wikiDownloadStatus').textContent = d.message || 'Done';
     loadLibStats();
+    loadWikiStats();
     loadLibraryWords();
+  }
+}
+
+async function rebuildWikiDb() {
+  const status = document.getElementById('wikiDownloadStatus');
+  const box = document.getElementById('wikiStatsBox');
+  if (status) status.textContent = 'Building separate Wikipedia corpus DB…';
+  if (box) box.innerHTML = 'Building separate Wikipedia corpus DB from downloaded dump…';
+  try {
+    const r = await fetch('/api/library/wiki_rebuild_db', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({dump_type:'abstracts'})
+    });
+    const d = await r.json();
+    if (!r.ok || d.error) throw new Error(d.error || 'Wiki DB build failed');
+    if (status) status.textContent = `Done: ${d.stems || 0} stems from ${d.articles || 0} articles`;
+    await loadWikiStats();
+    await loadLibStats();
+  } catch(e) {
+    if (status) status.textContent = e.message;
+    if (box) box.innerHTML = `<span style="color:var(--red)">${e.message}</span>`;
+  }
+}
+
+async function estimateWikiGrades() {
+  const status = document.getElementById('wikiDownloadStatus');
+  const box = document.getElementById('wikiStatsBox');
+  if (status) status.textContent = 'Estimating grade levels for all Wikipedia words...';
+  if (box) box.innerHTML = 'Estimating approximate Std 1-12 levels. This is a one-time pass and may take a moment...';
+  try {
+    const r = await fetch('/api/library/wiki_estimate_grades', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({})
+    });
+    const d = await r.json();
+    if (!r.ok || d.error) throw new Error(d.error || 'Grade estimation failed');
+    toast(`Estimated grades for ${Number(d.updated || 0).toLocaleString()} Wiki words`);
+    if (status) status.textContent = `Estimated ${Number(d.updated || 0).toLocaleString()} words`;
+    await loadWikiStats();
+  } catch(e) {
+    if (status) status.textContent = e.message;
+    if (box) box.innerHTML = `<span style="color:var(--red)">Could not estimate Wiki grades: ${e.message}</span>`;
   }
 }
 
@@ -4574,6 +5193,7 @@ function renderTamilFeaturesCard(data, context) {
   let targetId = context === 'checker' ? 'checkerResults' : 'stepResults';
   let container = document.getElementById(targetId);
   if (!container) return;
+  const clf = data.child_level_features || {};
   
   const html = `
     <div class="card" id="detailedFeaturesCard" style="margin-top:20px">
@@ -4587,7 +5207,16 @@ function renderTamilFeaturesCard(data, context) {
           <div class="metric-label">Poetry score</div>
           <div class="metric-value">${data.poem_prose?.poem_score || '—'}</div>
         </div>
+        ${clf.enabled ? `<div class="metric">
+          <div class="metric-label">Class signal</div>
+          <div class="metric-value teal">${escapeHtml(clf.estimated_band || '—')}</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Feature difficulty</div>
+          <div class="metric-value">${clf.difficulty_score || 0}</div>
+        </div>` : ''}
       </div>
+      ${clf.enabled ? `<div class="info-box" style="margin-top:12px">${(clf.reasons || []).slice(0,3).map(escapeHtml).join(' ')}</div>` : ''}
       
       ${data.idioms && data.idioms.length ? `<div class="card" style="margin-top:12px;background:var(--surface2)">
         <div class="card-title">Idioms & Proverbs (${data.idioms.length})</div>
@@ -4664,15 +5293,19 @@ async function loadReadingAsrStatus() {
 
 async function loadReadingPassage() {
   const grade = document.getElementById('readingGrade')?.value || 1;
+  const source = document.getElementById('readingSource')?.value || 'textbook';
   const passageEl = document.getElementById('readingPassage');
   const metaEl = document.getElementById('readingPassageMeta');
   const resultCard = document.getElementById('readingResultCard');
+  const lastText = passageEl?.textContent || '';
   if (passageEl) passageEl.textContent = 'Loading paragraph…';
   if (metaEl) metaEl.textContent = '';
-  const r = await fetch(`/api/reading/passage?grade=${grade}&_=${Date.now()}`, {cache: 'no-store'});
+  const r = await fetch(`/api/reading/passage?grade=${grade}&source=${encodeURIComponent(source)}&last_text=${encodeURIComponent(lastText)}&_=${Date.now()}`, {cache: 'no-store'});
   const d = await r.json();
   if (passageEl) passageEl.textContent = d.text;
-  if (metaEl) metaEl.textContent = `Standard ${d.grade} · ${d.word_count} Tamil words`;
+  const src = d.source === 'textbook' ? 'Extracted textbook' : 'Built-in sample';
+  const detail = d.source_detail ? ` · ${d.source_detail}` : '';
+  if (metaEl) metaEl.textContent = `Standard ${d.grade} · ${d.word_count} Tamil words · ${src}${detail}`;
   if (resultCard) resultCard.style.display = 'none';
 }
 
@@ -4814,12 +5447,14 @@ function renderTamilFeatures(d) {
   const pp = d.poem_prose || {};
   const gr = d.grammar || {};
   const sp = d.spoken_tamil || {};
+  const clf = d.child_level_features || {};
   document.getElementById('tfResults').style.display = 'block';
   document.getElementById('tfSummary').innerHTML = `
     <div class="metric"><div class="metric-label">Text type</div><div class="metric-value teal" style="font-size:17px">${escapeHtml(pp.type || '—')}</div><div class="note">Poem score: ${pp.poem_score || 0}</div></div>
     <div class="metric"><div class="metric-label">Grammar load</div><div class="metric-value ${gr.score >= 55 ? 'red' : gr.score < 25 ? 'teal' : ''}">${gr.score || 0}/100</div><div class="note">${escapeHtml(gr.label || '')}</div></div>
     <div class="metric"><div class="metric-label">Idioms/proverbs</div><div class="metric-value">${(d.idioms || []).length}</div></div>
-    <div class="metric"><div class="metric-label">Spoken Tamil</div><div class="metric-value purple">${sp.count || 0}</div><div class="note">${escapeHtml(sp.label || '')}</div></div>`;
+    <div class="metric"><div class="metric-label">Spoken Tamil</div><div class="metric-value purple">${sp.count || 0}</div><div class="note">${escapeHtml(sp.label || '')}</div></div>
+    ${clf.enabled ? `<div class="metric"><div class="metric-label">Class-level signal</div><div class="metric-value teal">${escapeHtml(clf.estimated_band || '—')}</div><div class="note">Difficulty ${clf.difficulty_score || 0}/100</div></div>` : ''}`;
 
   document.getElementById('tfIdioms').innerHTML = (d.idioms || []).map(x =>
     `<div class="review-row" style="grid-template-columns:1fr 1.5fr 100px"><b>${escapeHtml(x.phrase)}</b><span>${escapeHtml(x.meaning)}</span><span class="badge badge-blue">Std ${x.suggested_grade}</span></div>`
