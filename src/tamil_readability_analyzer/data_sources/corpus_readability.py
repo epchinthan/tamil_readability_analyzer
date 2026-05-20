@@ -14,8 +14,8 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List
 
-from . import indic_nlp_adapter as _indic_nlp
-from . import tamil_morphology as _tamil_morphology
+from .. import indic_nlp_adapter as _indic_nlp
+from .. import tamil_morphology as _tamil_morphology
 
 TAMIL_WORD_RE = re.compile(r'[\u0B80-\u0BFF]{2,}')
 SENTENCE_RE = re.compile(r'[.!?।\u0964\u0965\n]+')

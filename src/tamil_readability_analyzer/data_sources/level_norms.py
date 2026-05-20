@@ -14,7 +14,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List
 
-from . import indic_nlp_adapter as _indic_nlp
+from .. import indic_nlp_adapter as _indic_nlp
 
 NORMS_DB = 'data/level_norms.db'
 TAMIL_WORD_RE = re.compile(r'[\u0B80-\u0BFF]{2,}')

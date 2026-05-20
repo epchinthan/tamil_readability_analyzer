@@ -96,7 +96,7 @@ def _meaning_for_grade(meaning: Dict[str, Any] | None, grade: int, raw_text: str
     if meaning and meaning.get('enabled') and int(meaning.get('target_grade', -1)) == int(grade):
         return meaning
     try:
-        from . import meaning_kb
+        from .data_sources import meaning_kb
         res = meaning_kb.analyze_text_meaning(raw_text, int(grade), kb_dir, tokenize_fn=tokenize_fn, stem_fn=stem_fn, limit=500)
         if res and res.get('enabled'):
             return res

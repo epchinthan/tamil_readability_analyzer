@@ -9,7 +9,7 @@ __pycache__/
 # Generated logs, uploads, reports, and imported files
 logs/
 uploads/
-reports/
+/reports/
 textbooks_imported/
 textbooks_imported_text/
 
