@@ -174,7 +174,11 @@ def vocabulary_ladder(text: str, stem_fn: Callable[[str], str] | None = None) ->
     for group in LADDER_SEEDS:
         present = [w for w in group if w in toks]
         if present:
-            ladders.append({'ladder': list(group), 'present': present})
+            ladders.append({
+                'word': ' → '.join(group),
+                'ladder': list(group),
+                'present': present,
+            })
     return ladders
 
 

@@ -80,6 +80,14 @@ STOPWORDS = {
     'கொண்டு','செய்து','வரும்','இருக்கும்','உண்டு',
 }
 
+CORE_WORD_GRADES = {
+    word: 1 for word in STOPWORDS
+}
+CORE_WORD_GRADES.update({
+    'நான்': 1, 'நீ': 1, 'நாம்': 1, 'நாங்கள்': 1, 'என்': 1, 'எங்கள்': 1,
+    'அம்மா': 1, 'அப்பா': 1, 'வீடு': 1, 'பள்ளி': 1, 'புத்தகம்': 1,
+})
+
 GRADE_LABELS = {
     1:'Standard 1', 2:'Standard 2', 3:'Standard 3', 4:'Standard 4',
     5:'Standard 5', 6:'Standard 6', 7:'Standard 7', 8:'Standard 8',
@@ -195,6 +203,24 @@ def init_wiki_db() -> None:
             pass
     conn.commit()
     conn.close()
+
+
+def get_core_word_info(stem: str, display_word: str = '') -> Optional[Dict]:
+    """Return built-in core/function-word metadata for words not stored as glossary entries."""
+    candidates = [stem, display_word]
+    for word in candidates:
+        if word in CORE_WORD_GRADES:
+            return {
+                'stem': stem or word,
+                'display_word': display_word or word,
+                'grade_level': CORE_WORD_GRADES[word],
+                'grade_source': 'core_tamil',
+                'frequency': 0,
+                'concept': 'daily_life',
+                'confirmed': 1,
+                'definition': 'Core Tamil function/basic word',
+            }
+    return None
 
 
 def upsert_wiki_word(

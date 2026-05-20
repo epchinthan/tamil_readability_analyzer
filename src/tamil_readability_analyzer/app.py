@@ -1,4 +1,4 @@
-import os, re, json, random, sqlite3, datetime, io, math, hashlib, threading, logging, uuid, time
+import os, re, json, random, sqlite3, datetime, io, math, hashlib, threading, logging, uuid, time, zipfile
 from pathlib import Path
 import werkzeug.utils
 from . import analytics as _analytics
@@ -27,7 +27,7 @@ from werkzeug.utils import secure_filename
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 app = Flask(__name__, template_folder=str(REPO_ROOT / 'templates'))
-app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024
+app.config['MAX_CONTENT_LENGTH'] = int(os.environ.get('TAMIL_ANALYZER_MAX_UPLOAD_MB', '4096')) * 1024 * 1024
 app.config['UPLOAD_FOLDER'] = 'uploads'
 DB_PATH = 'tamil_analyzer.db'
 WATCH_FOLDER = None   # set via /api/config or config.json at startup
@@ -1874,20 +1874,160 @@ def analyze():
     # Target book sentence stats
     tss = sentence_stats(target_sent_counts)
 
-    # Per-paragraph suitability
+    # Per-paragraph reading level and support need
     paragraphs = [p.strip() for p in raw_text.split('\n\n') if p.strip()]
     paragraph_data = []
-    for para in paragraphs[:50]:  # limit to 50 paragraphs
-        para_stems = set(tokenize_tamil(para))
+    paragraph_corpus = None if grade_db_loaded else _corpus_readability.load_corpus()
+    for para in paragraphs:
+        para_words = tokenize_tamil(para)
+        if not para_words:
+            continue
+        para_stems = set()
+        for w in para_words:
+            stem = get_stem(w)
+            if stem:
+                para_stems.add(stem)
+        para_known_count = 0
+        para_total_count = len(para_stems)
+        para_sent_counts = sentence_word_counts(para)
+        para_avg_sentence = round(sum(para_sent_counts) / len(para_sent_counts), 1) if para_sent_counts else 0
+        display_text = para
+        problems = []
+
         if grade_db_loaded:
-            para_known = para_stems & range_known
-            para_pct = round(len(para_known) / len(para_stems) * 100, 1) if para_stems else 0
+            cumulative_para = set()
+            best_fit_grade = None
+            best_fit_pct = 0.0
+            best_fit_known = 0
+            best_fit_known_set = set()
+            for g in range(1, 13):
+                if g in grade_vocab:
+                    cumulative_para |= grade_vocab[g]
+                if g not in available_grades:
+                    continue
+                known = para_stems & cumulative_para
+                pct = round(len(known) / para_total_count * 100, 1) if para_total_count else 0.0
+                if pct > best_fit_pct:
+                    best_fit_pct = pct
+                    best_fit_known = len(known)
+                    best_fit_known_set = set(known)
+                if pct >= 80 and best_fit_grade is None:
+                    best_fit_grade = g
+                    best_fit_pct = pct
+                    best_fit_known = len(known)
+                    best_fit_known_set = set(known)
+                    break
+
+            para_known_count = best_fit_known
+            para_pct = best_fit_pct
+            estimated_grade = best_fit_grade
+            unknown_stems = para_stems - best_fit_known_set
+            unknown_words = [stem_to_original.get(s, s) for s in sorted(unknown_stems)]
+            if estimated_grade:
+                sent_max = grade_sent_stats.get(estimated_grade, {}).get('sent_max') or 0
+                long_sentences = sum(1 for c in para_sent_counts if sent_max and c > sent_max)
+                if unknown_words:
+                    problems.append(
+                        f"{len(unknown_words)} word(s) are above Std {estimated_grade} vocabulary: "
+                        + ', '.join(unknown_words[:8])
+                    )
+                if long_sentences:
+                    problems.append(
+                        f"{long_sentences} sentence(s) exceed the Std {estimated_grade} sentence-length norm of {sent_max} words."
+                    )
+                if para_pct >= 90 and para_avg_sentence <= (grade_sent_stats.get(estimated_grade, {}).get('sent_max') or 999):
+                    support = 'Independent reading'
+                    status = 'ok'
+                elif para_pct >= 80:
+                    support = 'Readable with light support'
+                    status = 'ok'
+                else:
+                    support = 'Needs teacher support'
+                    status = 'warn'
+                heading = f'Readable from Std {estimated_grade}'
+                basis = f'{para_pct}% of unique words known by Std {estimated_grade}'
+                if not problems:
+                    problems.append('No major vocabulary or sentence-length issue detected.')
+                suggestions = ['Use as-is for this level.'] if status == 'ok' else ['Pre-teach the listed unfamiliar words.', 'Read aloud once before independent reading.']
+            else:
+                problems.append(
+                    f"Vocabulary match never reaches 80%; {len(unknown_words)} word(s) remain outside the loaded standards."
+                )
+                if unknown_words:
+                    problems.append('Examples: ' + ', '.join(unknown_words[:12]))
+                support = 'Review or add glossary'
+                status = 'hard'
+                heading = 'Beyond loaded standards'
+                basis = f'Best vocabulary match is {para_pct}%'
+                suggestions = ['Add glossary support for difficult words.', 'Consider rewriting this paragraph for a lower class.']
+            if para_avg_sentence > 18:
+                problems.append(f'Average sentence length is high at {para_avg_sentence} words.')
+                suggestions.append('Split long sentences into shorter sentences.')
         else:
-            para_sent_counts = sentence_word_counts(para)
-            para_avg = sum(para_sent_counts) / len(para_sent_counts) if para_sent_counts else 0
-            length_penalty = max(0, para_avg - 8) * 3
-            para_pct = round(max(30.0, min(96.0, pct_suitable - length_penalty)), 1)
-        paragraph_data.append({'text': para[:200] + '...' if len(para) > 200 else para, 'suitable_pct': para_pct})
+            try:
+                para_context = _corpus_readability.analyze_text(
+                    para,
+                    corpus=paragraph_corpus,
+                    stem_fn=get_stem,
+                )
+            except Exception:
+                para_context = {}
+            level = para_context.get('estimated_level') or {}
+            estimated_grade = level.get('estimated_standard')
+            para_pct = float(para_context.get('tavi_score') or 0)
+            rarity = float(para_context.get('rare_or_unknown_pct') or 0)
+            formal = float(para_context.get('formal_word_pct') or 0)
+            compound = float(para_context.get('compound_word_pct') or 0)
+            rare_examples = [r.get('stem') for r in (para_context.get('rare_examples') or [])[:8] if r.get('stem')]
+            if rarity >= 18:
+                problems.append(f'{rarity}% of words are rare or corpus-unknown' + (': ' + ', '.join(rare_examples) if rare_examples else '.'))
+            if para_avg_sentence > 14:
+                problems.append(f'Average sentence length is high at {para_avg_sentence} words.')
+            if compound >= 25:
+                problems.append(f'Compound/agglutinated word density is high at {compound}%.')
+            if formal >= 10:
+                problems.append(f'Formal/abstract word density is high at {formal}%.')
+            if para_pct >= 78:
+                support = 'Independent reading likely'
+                status = 'ok'
+            elif para_pct >= 58:
+                support = 'Readable with teacher support'
+                status = 'warn'
+            else:
+                support = 'Rewrite or pre-teach first'
+                status = 'hard'
+            if level.get('estimated_standard_range'):
+                heading = f"Estimated {level.get('estimated_standard_range')}"
+            elif estimated_grade:
+                heading = f"Estimated Std {estimated_grade}"
+            else:
+                heading = 'Needs manual review'
+            basis = f"TAVI {round(para_pct, 1)} from corpus familiarity, rare words, morphology, and sentence length"
+            if not problems:
+                problems.append('No major corpus rarity, morphology, or sentence-length issue detected.')
+            suggestions = list(para_context.get('suggestions') or [])
+            if not suggestions:
+                suggestions = ['Use teacher judgment; textbook database is not loaded.']
+            if status == 'hard':
+                suggestions.insert(0, 'Pre-teach rare words or simplify before classroom use.')
+
+        paragraph_data.append({
+            'text': display_text,
+            'score': para_pct,
+            'suitable_pct': para_pct,
+            'known_words': para_known_count,
+            'total_words': para_total_count,
+            'word_count': len(para_words),
+            'avg_sentence_words': para_avg_sentence,
+            'estimated_grade': estimated_grade,
+            'heading': heading,
+            'support': support,
+            'status': status,
+            'basis': basis,
+            'problems': problems[:6],
+            'suggestions': suggestions[:4],
+            'estimated_only': not grade_db_loaded,
+        })
 
     best_comp = next((r['comprehension_pct'] for r in results
                       if r['comprehension_pct'] >= 80), results[-1]['comprehension_pct'] if results else 0)
@@ -1971,11 +2111,14 @@ def analyze():
     try:
         conn.execute("ALTER TABLE analyses ADD COLUMN v27_json TEXT")
     except: pass
+    try:
+        conn.execute("ALTER TABLE analyses ADD COLUMN paragraph_json TEXT")
+    except: pass
     conn.execute('''
         INSERT INTO analyses
           (book_name, analyzed_at, total_words, unique_words, unique_stems,
-           proper_nouns, sentence_json, results_json, analytics_json, meaning_json, suitability_json, v27_json)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+           proper_nouns, sentence_json, results_json, analytics_json, meaning_json, suitability_json, v27_json, paragraph_json)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
     ''', (book_name, datetime.datetime.now().isoformat(),
           total_words, unique_words, unique_stems_cnt,
           json.dumps(proper_noun_list),
@@ -1984,7 +2127,8 @@ def analyze():
           json.dumps(analytics_data),
           json.dumps(meaning_data),
           json.dumps(suitability_data),
-          json.dumps(v27_data)))
+          json.dumps(v27_data),
+          json.dumps(paragraph_data, ensure_ascii=False)))
     conn.commit()
     analysis_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
     conn.close()
@@ -2823,16 +2967,284 @@ def admin_dashboard():
     cache_dir = os.path.join('data', 'cache')
     cache_files = [p for p in os.listdir(cache_dir)] if os.path.isdir(cache_dir) else []
     cfg = _fw.load_config() if '_fw' in globals() else {}
+    readiness = _admin_readiness_checklist(grades, totals, missing)
     return jsonify({
         'totals': totals,
         'grades': grades,
         'files': files[:300],
         'missing_grades': missing,
+        'readiness': readiness,
         'db_size_mb': round(os.path.getsize(DB_PATH) / (1024 * 1024), 2) if os.path.exists(DB_PATH) else 0,
         'cache_files': len(cache_files),
         'watch_folder': cfg.get('watch_folder', ''),
         'watcher_status': dict(_fw.WATCHER_STATUS) if '_fw' in globals() else {},
     })
+
+
+def _json_file(path: str | Path) -> dict:
+    try:
+        p = Path(path)
+        return json.loads(p.read_text(encoding='utf-8')) if p.exists() else {}
+    except Exception:
+        return {}
+
+
+def _admin_readiness_item(status, title, detail, category='recommended', action='', page=''):
+    return {
+        'status': status,
+        'title': title,
+        'detail': detail,
+        'category': category,
+        'action': action,
+        'page': page,
+    }
+
+
+def _admin_readiness_checklist(grades, totals, missing):
+    items = []
+    grade_files = int(totals.get('grade_files') or 0)
+    grade_words = int(totals.get('grade_words') or 0)
+    loaded_grade_count = len({int(g.get('grade')) for g in grades if g.get('grade')})
+    if grade_words <= 0:
+        items.append(_admin_readiness_item(
+            'fail', 'Load textbook grade database',
+            'No grade vocabulary is loaded. Book analysis will fall back to estimates.',
+            'required', 'Upload textbooks or use Textbook Importer', 'database',
+        ))
+    elif missing:
+        items.append(_admin_readiness_item(
+            'warn', 'Complete grade coverage',
+            f'{loaded_grade_count}/12 standards loaded. Missing: ' + ', '.join(f'Std {g}' for g in missing),
+            'required', 'Load missing standards', 'database',
+        ))
+    else:
+        items.append(_admin_readiness_item(
+            'ok', 'Textbook grade database ready',
+            f'All 12 standards loaded with {grade_words:,} grade words from {grade_files:,} file(s).',
+            'required', 'Review database', 'database',
+        ))
+
+    if os.path.exists(DB_PATH):
+        items.append(_admin_readiness_item(
+            'ok', 'Analyzer database present',
+            f'{DB_PATH} exists ({round(os.path.getsize(DB_PATH)/(1024*1024), 2)} MB).',
+            'required',
+        ))
+    else:
+        items.append(_admin_readiness_item(
+            'fail', 'Analyzer database missing',
+            'Run setup/start once or upload an admin data bundle.',
+            'required', 'Upload data bundle', 'admin',
+        ))
+
+    required_dirs = ['uploads', 'reports', 'logs', 'data']
+    missing_dirs = [d for d in required_dirs if not os.path.isdir(d)]
+    items.append(_admin_readiness_item(
+        'ok' if not missing_dirs else 'warn',
+        'Runtime folders',
+        'All runtime folders exist.' if not missing_dirs else 'Missing folders: ' + ', '.join(missing_dirs),
+        'required',
+    ))
+
+    meaning_meta = _json_file('data/meaning_kb/metadata.json')
+    if meaning_meta:
+        items.append(_admin_readiness_item(
+            'ok', 'Meaning-level data built',
+            f"{meaning_meta.get('total_words', 0):,} words and {meaning_meta.get('total_phrases', 0):,} phrases available.",
+            'recommended', 'Rebuild meaning data', 'database',
+        ))
+    else:
+        items.append(_admin_readiness_item(
+            'warn', 'Build meaning-level data',
+            'Meaning/concept appropriateness reports will be limited until this is built.',
+            'recommended', 'Build meaning data', 'database',
+        ))
+
+    corpus_meta = _json_file('data/tamil_corpus/corpus_stats.json')
+    if corpus_meta:
+        items.append(_admin_readiness_item(
+            'ok', 'Tamil corpus / TAVI built',
+            f"{corpus_meta.get('unique_stems', 0):,} unique stems from {corpus_meta.get('documents', 0):,} document(s).",
+            'recommended', 'Refresh corpus', 'analyze',
+        ))
+    else:
+        items.append(_admin_readiness_item(
+            'warn', 'Build Tamil corpus / TAVI',
+            'Corpus-backed vocabulary signals are not available yet.',
+            'recommended', 'Build corpus', 'analyze',
+        ))
+
+    try:
+        norm_status = _level_norms.get_status()
+    except Exception:
+        norm_status = {'built': False}
+    if norm_status.get('built'):
+        items.append(_admin_readiness_item(
+            'ok', 'Grade-level norms built',
+            f"{norm_status.get('grade_count', 0)}/12 standards with {norm_status.get('source_files', 0):,} source file(s).",
+            'recommended', 'Refresh norms', 'analyze',
+        ))
+    else:
+        items.append(_admin_readiness_item(
+            'warn', 'Build grade-level norms',
+            'Sentence and paragraph norm comparison is not available yet.',
+            'recommended', 'Build norms', 'analyze',
+        ))
+
+    try:
+        lib_count = 0
+        if os.path.exists('word_library.db'):
+            lib_conn = sqlite3.connect('word_library.db')
+            lib_count = lib_conn.execute('SELECT COUNT(*) FROM word_library').fetchone()[0]
+            lib_conn.close()
+    except Exception:
+        lib_count = 0
+    if lib_count:
+        items.append(_admin_readiness_item(
+            'ok', 'Word library built',
+            f'{lib_count:,} library words available for lookup and teacher review.',
+            'recommended', 'Open word library', 'library',
+        ))
+    else:
+        items.append(_admin_readiness_item(
+            'warn', 'Build word library',
+            'Word library search, confirmation, and teacher overrides are not populated yet.',
+            'recommended', 'Build library', 'library',
+        ))
+
+    wiki_db = Path('data/wiki_corpus.db')
+    if wiki_db.exists():
+        items.append(_admin_readiness_item(
+            'ok', 'Wikipedia corpus available',
+            f'{round(wiki_db.stat().st_size/(1024*1024), 1)} MB local wiki corpus DB.',
+            'recommended', 'Open word library', 'library',
+        ))
+    else:
+        items.append(_admin_readiness_item(
+            'warn', 'Optional Wikipedia corpus',
+            'General Tamil estimates will improve if the wiki corpus is downloaded/built.',
+            'recommended', 'Download wiki corpus', 'library',
+        ))
+
+    fail_count = sum(1 for item in items if item['status'] == 'fail')
+    warn_count = sum(1 for item in items if item['status'] == 'warn')
+    return {
+        'ready': fail_count == 0,
+        'fail_count': fail_count,
+        'warn_count': warn_count,
+        'items': items,
+    }
+
+
+ADMIN_BUNDLE_DIRS = {
+    'data',
+    'textbooks_imported',
+    'textbooks_imported_text',
+}
+ADMIN_BUNDLE_FILES = {
+    'tamil_analyzer.db',
+    'word_library.db',
+}
+
+
+def _normalize_bundle_member(name: str, common_prefix: str = '') -> str:
+    normalized = (name or '').replace('\\', '/').lstrip('/')
+    if common_prefix and normalized.startswith(common_prefix):
+        normalized = normalized[len(common_prefix):]
+    return normalized
+
+
+def _admin_bundle_common_prefix(names):
+    parts = []
+    for name in names:
+        clean = (name or '').replace('\\', '/').lstrip('/')
+        if clean and '/' in clean:
+            parts.append(clean.split('/', 1)[0])
+        elif clean:
+            parts.append('')
+    if parts and parts[0] and all(p == parts[0] for p in parts):
+        return parts[0] + '/'
+    return ''
+
+
+def _is_allowed_admin_bundle_path(path: str) -> bool:
+    first = path.split('/', 1)[0]
+    return first in ADMIN_BUNDLE_DIRS or path in ADMIN_BUNDLE_FILES
+
+
+@app.route('/api/admin/upload_data_bundle', methods=['POST'])
+def admin_upload_data_bundle():
+    """Restore generated/local data from an admin ZIP bundle."""
+    bundle = request.files.get('bundle')
+    if not bundle or not bundle.filename:
+        return jsonify({'error': 'Upload a ZIP data bundle.'}), 400
+    if not bundle.filename.lower().endswith('.zip'):
+        return jsonify({'error': 'Only .zip bundles are supported.'}), 400
+
+    replace = request.form.get('replace') == '1'
+    os.makedirs('uploads', exist_ok=True)
+    safe = werkzeug.utils.secure_filename(bundle.filename) or f'admin_data_{uuid.uuid4().hex}.zip'
+    zip_path = os.path.join('uploads', f'admin_data_{uuid.uuid4().hex}_{safe}')
+    bundle.save(zip_path)
+
+    restored = []
+    skipped = []
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            members = [m for m in zf.infolist() if not m.is_dir()]
+            prefix = _admin_bundle_common_prefix([m.filename for m in members])
+            total_uncompressed = sum(m.file_size for m in members)
+            max_uncompressed = int(os.environ.get('TAMIL_ANALYZER_ADMIN_BUNDLE_MAX_MB', '4096')) * 1024 * 1024
+            if total_uncompressed > max_uncompressed:
+                return jsonify({
+                    'error': f'Bundle is too large after unzip ({round(total_uncompressed / (1024*1024), 1)} MB).',
+                    'max_mb': round(max_uncompressed / (1024*1024)),
+                }), 400
+
+            for member in members:
+                rel = _normalize_bundle_member(member.filename, prefix)
+                if not rel or rel.startswith('../') or '/..' in rel or rel.startswith('.git/'):
+                    skipped.append({'path': member.filename, 'reason': 'unsafe path'})
+                    continue
+                if not _is_allowed_admin_bundle_path(rel):
+                    skipped.append({'path': rel, 'reason': 'not an allowed data path'})
+                    continue
+
+                dest = os.path.abspath(os.path.join(REPO_ROOT, rel))
+                root = os.path.abspath(str(REPO_ROOT))
+                if not (dest == root or dest.startswith(root + os.sep)):
+                    skipped.append({'path': rel, 'reason': 'outside project root'})
+                    continue
+                if os.path.exists(dest) and not replace:
+                    skipped.append({'path': rel, 'reason': 'already exists'})
+                    continue
+
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                with zf.open(member) as src, open(dest, 'wb') as out:
+                    while True:
+                        chunk = src.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        out.write(chunk)
+                restored.append(rel)
+
+        return jsonify({
+            'ok': True,
+            'restored_count': len(restored),
+            'skipped_count': len(skipped),
+            'restored': restored[:200],
+            'skipped': skipped[:200],
+        })
+    except zipfile.BadZipFile:
+        return jsonify({'error': 'The uploaded file is not a valid ZIP archive.'}), 400
+    except Exception as e:
+        logging.getLogger('app').exception('Admin data bundle restore failed')
+        return jsonify({'error': str(e)}), 500
+    finally:
+        try:
+            os.unlink(zip_path)
+        except OSError:
+            pass
 
 READING_PASSAGES = {
     1: [
@@ -3304,9 +3716,10 @@ def generate_report(analysis_id):
     book_name    = row['book_name']
     tss          = sent_data.get('target', {})
     meaning      = json.loads(row.get('meaning_json') or 'null') if 'meaning_json' in row.keys() else None
+    paragraphs   = json.loads(row.get('paragraph_json') or '[]') if 'paragraph_json' in row.keys() else []
 
     try:
-        pdf_bytes = generate_shaped_tamil_report_pdf(row, results, distribution, proper_nouns, sent_data, meaning)
+        pdf_bytes = generate_shaped_tamil_report_pdf(row, results, distribution, proper_nouns, sent_data, meaning, paragraphs)
         safe_name = re.sub(r'[^\w]', '_', os.path.splitext(book_name)[0])
         return send_file(io.BytesIO(pdf_bytes), mimetype='application/pdf',
                          as_attachment=True,
@@ -4540,6 +4953,79 @@ def library_search():
         return jsonify([])
     try:
         return jsonify(_wlib.search_word(q, limit=limit))
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/library/corpus_check')
+def library_corpus_check():
+    q = request.args.get('q', '').strip()
+    if not q:
+        return jsonify({'error': 'Enter a Tamil word to check.'}), 400
+
+    tokens = tokenize_tamil(q)
+    word = tokens[0] if tokens else q
+    stem = get_stem(word)
+
+    try:
+        lib_conn = _wlib.get_lib_db()
+        lib_row = lib_conn.execute('''
+            SELECT * FROM word_library
+            WHERE stem = ? OR display_word = ?
+            ORDER BY confirmed DESC, frequency DESC
+            LIMIT 1
+        ''', (stem, word)).fetchone()
+        lib_conn.close()
+
+        conn = get_db()
+        grade_rows = conn.execute('''
+            SELECT grade, COUNT(*) AS cnt
+            FROM grade_words
+            WHERE word = ? OR word = ?
+            GROUP BY grade ORDER BY grade
+        ''', (stem, word)).fetchall()
+        first_grade = conn.execute(
+            'SELECT first_grade FROM word_grade_map WHERE stem = ?',
+            (stem,)
+        ).fetchone()
+        conn.close()
+
+        core_word = _wlib.get_core_word_info(stem, word)
+        corpus = _corpus_readability.load_corpus(include_wiki=False)
+        local_count = 0
+        band_matches = []
+        if corpus.get('built'):
+            local_count = int(corpus.get('global_freq', {}).get(stem, 0))
+            for band, freq in (corpus.get('bands') or {}).items():
+                count = int(freq.get(stem, 0))
+                if count:
+                    band_matches.append({'band': band, 'count': count})
+
+        wiki = (_wlib.lookup_wiki_words([stem], limit=1).get(stem) or {})
+        wiki_note = ''
+        if not wiki and core_word:
+            wiki_note = 'Skipped by Wikipedia importer because this is a core/function word.'
+
+        return jsonify({
+            'query': q,
+            'word': word,
+            'stem': stem,
+            'textbook': {
+                'found': bool(grade_rows or first_grade),
+                'first_grade': first_grade['first_grade'] if first_grade else None,
+                'grades': [dict(r) for r in grade_rows],
+            },
+            'core_word': core_word,
+            'word_library': dict(lib_row) if lib_row else None,
+            'local_corpus': {
+                'built': bool(corpus.get('built')),
+                'frequency': local_count,
+                'band_matches': band_matches,
+                'sources': corpus.get('stats', {}).get('sources', {}) if corpus.get('built') else {},
+            },
+            'wikipedia': wiki,
+            'wikipedia_note': wiki_note,
+        })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

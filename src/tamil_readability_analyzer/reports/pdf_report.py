@@ -10,7 +10,7 @@ import tempfile
 import uuid
 
 
-def generate_shaped_tamil_report_pdf(row, results, distribution, proper_nouns, sent_data, meaning=None):
+def generate_shaped_tamil_report_pdf(row, results, distribution, proper_nouns, sent_data, meaning=None, paragraphs=None):
     """Render the PDF report through MuPDF HTML so Tamil glyphs are shaped correctly."""
     import fitz
 
@@ -43,21 +43,11 @@ def generate_shaped_tamil_report_pdf(row, results, distribution, proper_nouns, s
         if limit and len(shown) > limit:
             extra = len(shown) - limit
             shown = shown[:limit]
-        cells = []
-        for i, word in enumerate(shown):
-            if i % cols == 0:
-                cells.append('<tr>')
-            cells.append(f'<td class="word">{word_html(word)}</td>')
-            if i % cols == cols - 1:
-                cells.append('</tr>')
-        if shown and len(shown) % cols:
-            for _ in range(cols - (len(shown) % cols)):
-                cells.append('<td class="word empty"></td>')
-            cells.append('</tr>')
         if not shown:
             return ''
+        cells = ''.join(f'<span class="word-chip">{word_html(word)}</span>' for word in shown)
         note = f'<p class="note">... and {extra:,} more (see Excel export for full list)</p>' if extra else ''
-        return f'<table class="word-grid">{"".join(cells)}</table>{note}'
+        return f'<div class="word-grid">{cells}</div>{note}'
 
     overview_rows = [
         ('Total words in book', f"{row['total_words']:,}"),
@@ -144,10 +134,47 @@ def generate_shaped_tamil_report_pdf(row, results, distribution, proper_nouns, s
     proper_nouns_html = ''
     if proper_nouns:
         proper_nouns_html = (
-            '<section class="page-break"><h1>Section 5 - Proper Nouns (Counted as Known)</h1>'
+            '<section class="page-break"><h1>Section 6 - Proper Nouns (Counted as Known)</h1>'
             '<p class="note">These words were identified as names, places, deities, or foreign proper nouns. '
             'They are counted as known at all grade levels since students can learn them from context.</p>'
             f'{word_grid(proper_nouns, cols=5)}</section>'
+        )
+
+    paragraph_rows = []
+    for idx, para in enumerate(paragraphs or [], start=1):
+        status = para.get('status') or ''
+        cls = 'good' if status == 'ok' else 'mid' if status == 'warn' else 'hard'
+        suggestions = para.get('suggestions') or []
+        problems = para.get('problems') or []
+        problems_html = ''
+        if problems:
+            problems_html = '<p><strong>Problems:</strong></p><ul>' + ''.join(f'<li>{esc(s)}</li>' for s in problems) + '</ul>'
+        suggestions_html = ''
+        if suggestions:
+            suggestions_html = '<p><strong>Suggestions:</strong></p><ul>' + ''.join(f'<li>{esc(s)}</li>' for s in suggestions) + '</ul>'
+        known_note = ''
+        if not para.get('estimated_only') and para.get('total_words'):
+            known_note = f' | Known unique words: {int(para.get("known_words") or 0):,}/{int(para.get("total_words") or 0):,}'
+        paragraph_rows.append(
+            f'<div class="para {cls}">'
+            f'<h2>Paragraph {idx}: {esc(para.get("heading") or "Reading level unavailable")}</h2>'
+            f'<p><strong>Verdict:</strong> {esc(para.get("support") or "-")}</p>'
+            f'<p class="note">{esc(para.get("basis") or "")}{known_note} | '
+            f'Words: {int(para.get("word_count") or 0):,} | '
+            f'Average sentence: {esc(para.get("avg_sentence_words") or 0)} words</p>'
+            f'<div class="para-text">{esc(para.get("text") or "")}</div>'
+            f'{problems_html}'
+            f'{suggestions_html}'
+            '</div>'
+        )
+    paragraph_section = ''
+    if paragraph_rows:
+        paragraph_section = (
+            '<section class="page-break">'
+            '<h1>Section 5 - Paragraph-Level Reading Support</h1>'
+            '<p class="note">Non-Tamil separators and decorative lines are skipped. Each paragraph shows its estimated reading level, classroom support verdict, and editing suggestions.</p>'
+            f'{"".join(paragraph_rows)}'
+            '</section>'
         )
 
     doc_html = f"""<!doctype html>
@@ -172,10 +199,16 @@ def generate_shaped_tamil_report_pdf(row, results, distribution, proper_nouns, s
   .good {{ background:#D4EDDA; }}
   .mid {{ background:#FFF3CD; }}
   .hard {{ background:#F8D7DA; }}
-  .word-grid {{ table-layout:fixed; font-size:9pt; line-height:1.45; }}
-  .word-grid td {{ min-height:18pt; overflow-wrap:anywhere; word-break:break-word; background:white !important; }}
-  .word-grid tr:nth-child(even) td {{ background:#F8D7DA !important; }}
-  .word-grid .empty {{ background:white !important; }}
+  .word-grid {{ font-size:9pt; line-height:1.8; margin:5pt 0 12pt; }}
+  .word-chip {{ display:inline-block; border:0.35pt solid #d8d8d8; padding:2pt 4pt; margin:1.5pt; background:#fff; overflow-wrap:anywhere; }}
+  .para {{ border:0.45pt solid #c9c9c9; padding:7pt; margin:7pt 0; page-break-inside:avoid; }}
+  .para h2 {{ margin-top:0; }}
+  .para p {{ margin:2pt 0 4pt; }}
+  .para ul {{ margin:3pt 0 2pt 14pt; padding:0; }}
+  .para-text {{ font-size:11pt; line-height:1.65; margin-top:5pt; }}
+  .para.good {{ background:#E8F5E8; }}
+  .para.mid {{ background:#FFF3CD; }}
+  .para.hard {{ background:#F8D7DA; }}
   .page-break {{ page-break-before:always; }}
 </style>
 </head>
@@ -218,6 +251,8 @@ def generate_shaped_tamil_report_pdf(row, results, distribution, proper_nouns, s
     <p class="note">Words in this book that are new to a student at each level - not yet encountered in their studies up to that standard.</p>
     {''.join(section4)}
   </section>
+
+  {paragraph_section}
 
   {proper_nouns_html}
 </body>

@@ -49,13 +49,13 @@ def clamp(x: float, lo: float = 0.0, hi: float = 100.0) -> float:
 
 
 def verdict_for_score(score: float) -> str:
-    if score >= 91:
+    if score >= 95:
         return 'Very suitable'
-    if score >= 76:
+    if score >= 90:
         return 'Suitable'
-    if score >= 61:
+    if score >= 75:
         return 'Partly suitable'
-    if score >= 41:
+    if score >= 50:
         return 'Needs major changes'
     return 'Not suitable'
 
@@ -204,7 +204,7 @@ def build_suitability_report(
             'page_summary': consistency,
         })
 
-    recommended = next((row for row in class_rows if row['overall_pct'] >= 76), None)
+    recommended = next((row for row in class_rows if row['overall_pct'] >= 90), None)
     if recommended is None and class_rows:
         recommended = max(class_rows, key=lambda x: x['overall_pct'])
 
@@ -240,7 +240,7 @@ def _confidence(rows: List[Dict[str, Any]], rec: Dict[str, Any] | None) -> float
         return 0.0
     scores = sorted([r['overall_pct'] for r in rows], reverse=True)
     gap = scores[0] - scores[1] if len(scores) > 1 else 20
-    base = 60 + min(25, gap) + (10 if rec['overall_pct'] >= 76 else 0)
+    base = 60 + min(25, gap) + (10 if rec['overall_pct'] >= 90 else 0)
     return round(clamp(base), 1)
 
 
