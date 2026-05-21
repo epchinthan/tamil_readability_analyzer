@@ -218,13 +218,13 @@ scoring needs a local/server ASR engine.
 On Ubuntu, the easiest setup is:
 
 ```bash
-./start.sh --install-reading-asr small
+./start.sh --install-reading-asr large-v3
 ```
 
-For better quality on a stronger machine:
+For faster testing on a weaker machine:
 
 ```bash
-./start.sh --install-reading-asr medium
+./start.sh --install-reading-asr small
 ```
 
 After installation, start normally:
@@ -233,18 +233,21 @@ After installation, start normally:
 ./start.sh
 ```
 
-`start.sh` automatically installs `tools/whisper.cpp` with the `small` multilingual model on first startup if no local ASR engine is present. These downloaded/build files are ignored by Git and should not be committed.
+`start.sh` automatically installs `tools/whisper.cpp` with the `large-v3` multilingual model on first startup if no local ASR engine is present. These downloaded/build files are ignored by Git and should not be committed.
 
 To choose a different model for the first automatic install:
 
 ```bash
-TAMIL_READING_ASR_MODEL=medium ./start.sh
+TAMIL_READING_ASR_MODEL=small ./start.sh
 ```
 
 `start.sh` automatically detects:
 
 ```text
 tools/whisper.cpp/build/bin/whisper-cli
+tools/whisper.cpp/models/ggml-large-v3.bin
+tools/whisper.cpp/models/ggml-large-v2.bin
+tools/whisper.cpp/models/ggml-large.bin
 tools/whisper.cpp/models/ggml-medium.bin
 tools/whisper.cpp/models/ggml-small.bin
 tools/whisper.cpp/models/ggml-base.bin
@@ -256,6 +259,15 @@ Advanced users can point the app at any Tamil ASR command:
 export TAMIL_READING_ASR_CMD="/path/to/asr --lang {lang} --audio {wav}"
 ./start.sh
 ```
+
+Cloud ASR can also be configured from the Reading Practice page. The UI supports:
+
+- OpenAI API (`gpt-4o-transcribe` or `gpt-4o-mini-transcribe`)
+- Groq Whisper Large V3 (`whisper-large-v3`)
+- Groq Whisper Large V3 Turbo (`whisper-large-v3-turbo`)
+- Custom OpenAI-compatible Whisper API endpoint/model
+
+Saved API keys are stored locally in `config.json`; the page only shows a masked key hint after saving.
 
 ## Optional: Indic NLP Library enhancements
 

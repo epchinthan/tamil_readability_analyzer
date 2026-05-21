@@ -3561,14 +3561,112 @@ def reading_passage():
         'word_count': len(_reading_score.tamil_words(text)),
     })
 
+def _load_config_safe():
+    try:
+        return _fw.load_config() if '_fw' in globals() else {}
+    except Exception:
+        return {}
+
+
+def _save_config_safe(cfg):
+    try:
+        _fw.save_config(cfg)
+    except Exception:
+        with open('config.json', 'w', encoding='utf-8') as f:
+            json.dump(cfg, f, ensure_ascii=False, indent=2)
+
+
+def _reading_asr_config():
+    cfg = _load_config_safe()
+    asr = cfg.get('reading_asr', {}) if isinstance(cfg, dict) else {}
+    return {
+        'openai_api_key': asr.get('openai_api_key', ''),
+        'openai_url': asr.get('openai_url') or os.environ.get('OPENAI_TRANSCRIPTION_URL', 'https://api.openai.com/v1/audio/transcriptions'),
+        'openai_model': asr.get('openai_model') or os.environ.get('OPENAI_TRANSCRIPTION_MODEL', 'gpt-4o-transcribe'),
+        'whisper_api_key': asr.get('whisper_api_key', ''),
+        'whisper_api_url': asr.get('whisper_api_url') or os.environ.get('TAMIL_READING_WHISPER_API_URL', 'https://api.groq.com/openai/v1/audio/transcriptions'),
+        'whisper_api_model': asr.get('whisper_api_model') or os.environ.get('TAMIL_READING_WHISPER_API_MODEL', 'whisper-large-v3'),
+    }
+
+
+def _has_secret(config_key, *env_names):
+    cfg = _reading_asr_config()
+    return bool(str(cfg.get(config_key, '')).strip() or any(os.environ.get(name, '').strip() for name in env_names))
+
+
+def _secret_hint(config_key, *env_names):
+    value = str(_reading_asr_config().get(config_key, '')).strip()
+    source = 'saved'
+    if not value:
+        for name in env_names:
+            if os.environ.get(name, '').strip():
+                value = os.environ.get(name, '').strip()
+                source = name
+                break
+    if not value:
+        return ''
+    return f'{source} · ...{value[-4:]}'
+
+
 @app.route('/api/reading/asr_status')
 def reading_asr_status():
+    asr_cfg = _reading_asr_config()
     return jsonify({
         'configured': bool(os.environ.get('TAMIL_READING_ASR_CMD') or (os.environ.get('WHISPER_CPP_BIN') and os.environ.get('WHISPER_CPP_MODEL'))),
         'engine': 'custom' if os.environ.get('TAMIL_READING_ASR_CMD') else 'whisper.cpp',
         'whisper_bin': os.environ.get('WHISPER_CPP_BIN', ''),
         'model': os.path.basename(os.environ.get('WHISPER_CPP_MODEL', '')),
+        'openai_configured': _has_secret('openai_api_key', 'OPENAI_API_KEY'),
+        'openai_key_hint': _secret_hint('openai_api_key', 'OPENAI_API_KEY'),
+        'openai_model': asr_cfg['openai_model'],
+        'openai_url': asr_cfg['openai_url'],
+        'whisper_api_configured': _has_secret('whisper_api_key', 'TAMIL_READING_WHISPER_API_KEY', 'GROQ_API_KEY', 'WHISPER_API_KEY'),
+        'whisper_api_key_hint': _secret_hint('whisper_api_key', 'TAMIL_READING_WHISPER_API_KEY', 'GROQ_API_KEY', 'WHISPER_API_KEY'),
+        'whisper_api_model': asr_cfg['whisper_api_model'],
+        'whisper_api_url': asr_cfg['whisper_api_url'],
+        'groq_large_v3_model': 'whisper-large-v3',
+        'groq_large_v3_turbo_model': 'whisper-large-v3-turbo',
     })
+
+@app.route('/api/reading/asr_settings', methods=['GET', 'POST'])
+def reading_asr_settings():
+    if request.method == 'GET':
+        asr_cfg = _reading_asr_config()
+        return jsonify({
+            'openai_configured': _has_secret('openai_api_key', 'OPENAI_API_KEY'),
+            'openai_key_hint': _secret_hint('openai_api_key', 'OPENAI_API_KEY'),
+            'openai_url': asr_cfg['openai_url'],
+            'openai_model': asr_cfg['openai_model'],
+            'whisper_api_configured': _has_secret('whisper_api_key', 'TAMIL_READING_WHISPER_API_KEY', 'GROQ_API_KEY', 'WHISPER_API_KEY'),
+            'whisper_api_key_hint': _secret_hint('whisper_api_key', 'TAMIL_READING_WHISPER_API_KEY', 'GROQ_API_KEY', 'WHISPER_API_KEY'),
+            'whisper_api_url': asr_cfg['whisper_api_url'],
+            'whisper_api_model': asr_cfg['whisper_api_model'],
+        })
+
+    data = request.get_json(silent=True) or {}
+    cfg = _load_config_safe()
+    if not isinstance(cfg, dict):
+        cfg = {}
+    current = cfg.get('reading_asr', {}) if isinstance(cfg.get('reading_asr', {}), dict) else {}
+    updated = {
+        'openai_api_key': current.get('openai_api_key', ''),
+        'openai_url': (data.get('openai_url') or current.get('openai_url') or 'https://api.openai.com/v1/audio/transcriptions').strip(),
+        'openai_model': (data.get('openai_model') or current.get('openai_model') or 'gpt-4o-transcribe').strip(),
+        'whisper_api_key': current.get('whisper_api_key', ''),
+        'whisper_api_url': (data.get('whisper_api_url') or current.get('whisper_api_url') or 'https://api.groq.com/openai/v1/audio/transcriptions').strip(),
+        'whisper_api_model': (data.get('whisper_api_model') or current.get('whisper_api_model') or 'whisper-large-v3').strip(),
+    }
+    if data.get('openai_api_key'):
+        updated['openai_api_key'] = str(data.get('openai_api_key')).strip()
+    if data.get('whisper_api_key'):
+        updated['whisper_api_key'] = str(data.get('whisper_api_key')).strip()
+    if data.get('clear_openai_key'):
+        updated['openai_api_key'] = ''
+    if data.get('clear_whisper_api_key'):
+        updated['whisper_api_key'] = ''
+    cfg['reading_asr'] = updated
+    _save_config_safe(cfg)
+    return jsonify({'ok': True})
 
 @app.route('/api/reading/submit', methods=['POST'])
 def reading_submit():
@@ -3577,6 +3675,7 @@ def reading_submit():
     student_name = request.form.get('student_name', '').strip()
     strictness = request.form.get('strictness', 'gentle')
     manual_transcript = request.form.get('manual_transcript', '').strip()
+    asr_mode = request.form.get('asr_mode', 'auto').strip() or 'auto'
 
     if not expected_text.strip():
         return jsonify({'error': 'Missing passage text.'}), 400
@@ -3593,7 +3692,7 @@ def reading_submit():
             safe = secure_filename(audio.filename or 'reading.webm') or 'reading.webm'
             audio_path = os.path.join('uploads', 'reading', f'{uuid.uuid4().hex}_{safe}')
             audio.save(audio_path)
-            asr = _reading_asr.transcribe(audio_path, 'ta')
+            asr = _reading_asr.transcribe(audio_path, 'ta', asr_mode, _reading_asr_config())
             transcript = asr.get('transcript', '')
             engine = asr.get('engine', 'asr')
             if audio_path and os.path.exists(audio_path):

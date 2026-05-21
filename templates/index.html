@@ -933,7 +933,7 @@
 
       <div class="card">
         <div class="card-title">Teacher Setup</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px">
           <div class="form-row">
             <label>Student name</label>
             <input id="readingStudent" class="input" placeholder="Optional">
@@ -964,15 +964,77 @@
               <option value="default">Built-in samples</option>
             </select>
           </div>
+          <div class="form-row">
+            <label>Speech recognition</label>
+            <select id="readingAsrMode" class="input" onchange="loadReadingAsrStatus()">
+              <option value="auto" selected>Auto / local large-v3</option>
+              <option value="openai">OpenAI API</option>
+              <option value="groq_large_v3">Groq Whisper Large V3</option>
+              <option value="groq_large_v3_turbo">Groq Whisper Large V3 Turbo</option>
+              <option value="whisper_api">Custom Whisper API</option>
+            </select>
+          </div>
         </div>
         <div id="readingAsrStatus" class="info-box">Checking Tamil ASR setup…</div>
+        <div id="readingAsrCredentials" class="card" style="margin:10px 0 0;background:var(--surface2)">
+          <div class="card-title">Cloud ASR Credentials</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
+            <div class="form-row reading-asr-openai">
+              <label>OpenAI API key</label>
+              <input id="readingOpenAiKey" class="input" type="password" autocomplete="off" placeholder="Leave blank to keep saved key">
+              <div class="note" id="readingOpenAiKeyHint"></div>
+            </div>
+            <div class="form-row reading-asr-openai">
+              <label>OpenAI model</label>
+              <select id="readingOpenAiModel" class="input">
+                <option value="gpt-4o-transcribe">gpt-4o-transcribe</option>
+                <option value="gpt-4o-mini-transcribe">gpt-4o-mini-transcribe</option>
+              </select>
+            </div>
+            <div class="form-row reading-asr-openai">
+              <label>OpenAI endpoint</label>
+              <input id="readingOpenAiUrl" class="input" value="https://api.openai.com/v1/audio/transcriptions">
+            </div>
+            <div class="form-row reading-asr-whisper">
+              <label>Groq / Whisper API key</label>
+              <input id="readingWhisperApiKey" class="input" type="password" autocomplete="off" placeholder="Leave blank to keep saved key">
+              <div class="note" id="readingWhisperApiKeyHint"></div>
+            </div>
+            <div class="form-row reading-asr-whisper reading-asr-custom-whisper">
+              <label>Custom Whisper model</label>
+              <select id="readingWhisperApiModel" class="input">
+                <option value="whisper-large-v3">whisper-large-v3</option>
+                <option value="whisper-large-v3-turbo">whisper-large-v3-turbo</option>
+              </select>
+            </div>
+            <div class="form-row reading-asr-whisper">
+              <label>Whisper API endpoint</label>
+              <input id="readingWhisperApiUrl" class="input" value="https://api.groq.com/openai/v1/audio/transcriptions">
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px">
+            <button class="btn btn-primary" onclick="saveReadingAsrSettings()">Save credentials</button>
+            <label class="reading-asr-openai" style="display:flex;gap:6px;align-items:center;font-size:12px;color:var(--text2)"><input type="checkbox" id="readingClearOpenAiKey"> Clear OpenAI key</label>
+            <label class="reading-asr-whisper" style="display:flex;gap:6px;align-items:center;font-size:12px;color:var(--text2)"><input type="checkbox" id="readingClearWhisperApiKey"> Clear Groq/Whisper key</label>
+            <span id="readingAsrSettingsStatus" class="status-msg"></span>
+          </div>
+        </div>
         <div id="readingAsrSetup" class="card" style="display:none;margin:0;background:var(--surface2)">
           <div class="card-title">Tamil ASR Setup</div>
           <p class="note" style="margin-bottom:8px">Reading Practice needs a local/server speech-to-text engine before it can score recorded child speech. The scoring fallback still works if you paste a Tamil transcript manually.</p>
           <div style="font-size:12px;line-height:1.7;color:var(--text2)">
-            <b>Recommended high-quality path:</b> install a Tamil-capable ASR engine, then set one of these before starting the app:
+            <b>Recommended high-quality path:</b> install a Tamil-capable ASR engine, or set API keys before starting the app:
             <pre style="white-space:pre-wrap;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px;margin-top:8px">export WHISPER_CPP_BIN=/path/to/whisper-cli
-export WHISPER_CPP_MODEL=/path/to/ggml-small-or-medium.bin
+export WHISPER_CPP_MODEL=/path/to/ggml-large-v3.bin
+
+# OpenAI API mode:
+export OPENAI_API_KEY=...
+export OPENAI_TRANSCRIPTION_MODEL=gpt-4o-transcribe
+
+# Whisper API large-v3 mode, for OpenAI-compatible providers:
+export TAMIL_READING_WHISPER_API_KEY=...
+export TAMIL_READING_WHISPER_API_URL=https://api.groq.com/openai/v1/audio/transcriptions
+export TAMIL_READING_WHISPER_API_MODEL=whisper-large-v3
 
 # Or use any custom Tamil ASR command that prints transcript text:
 export TAMIL_READING_ASR_CMD="/path/to/asr --lang {lang} --audio {wav}"</pre>
@@ -5537,21 +5599,109 @@ let _readingLoaded = false;
 async function initReadingPractice() {
   if (_readingLoaded) return;
   _readingLoaded = true;
+  await loadReadingAsrSettings();
   await loadReadingAsrStatus();
   await loadReadingPassage();
+}
+
+function updateReadingAsrCredentialPanel() {
+  const mode = document.getElementById('readingAsrMode')?.value || 'auto';
+  const panel = document.getElementById('readingAsrCredentials');
+  const isOpenAi = mode === 'openai';
+  const isWhisper = ['groq_large_v3', 'groq_large_v3_turbo', 'whisper_api'].includes(mode);
+  const isCustomWhisper = mode === 'whisper_api';
+  if (panel) panel.style.display = (isOpenAi || isWhisper) ? 'block' : 'none';
+  document.querySelectorAll('.reading-asr-openai').forEach(el => el.style.display = isOpenAi ? '' : 'none');
+  document.querySelectorAll('.reading-asr-whisper').forEach(el => el.style.display = isWhisper ? '' : 'none');
+  document.querySelectorAll('.reading-asr-custom-whisper').forEach(el => el.style.display = isCustomWhisper ? '' : 'none');
+
+  const whisperModel = document.getElementById('readingWhisperApiModel');
+  if (whisperModel && mode === 'groq_large_v3') whisperModel.value = 'whisper-large-v3';
+  if (whisperModel && mode === 'groq_large_v3_turbo') whisperModel.value = 'whisper-large-v3-turbo';
+}
+
+async function loadReadingAsrSettings() {
+  try {
+    const r = await fetch('/api/reading/asr_settings');
+    const d = await r.json();
+    const openAiUrl = document.getElementById('readingOpenAiUrl');
+    const openAiModel = document.getElementById('readingOpenAiModel');
+    const whisperUrl = document.getElementById('readingWhisperApiUrl');
+    const whisperModel = document.getElementById('readingWhisperApiModel');
+    if (openAiUrl) openAiUrl.value = d.openai_url || 'https://api.openai.com/v1/audio/transcriptions';
+    if (openAiModel) openAiModel.value = d.openai_model || 'gpt-4o-transcribe';
+    if (whisperUrl) whisperUrl.value = d.whisper_api_url || 'https://api.groq.com/openai/v1/audio/transcriptions';
+    if (whisperModel) whisperModel.value = d.whisper_api_model || 'whisper-large-v3';
+    const openAiHint = document.getElementById('readingOpenAiKeyHint');
+    const whisperHint = document.getElementById('readingWhisperApiKeyHint');
+    if (openAiHint) openAiHint.textContent = d.openai_configured ? `Configured (${d.openai_key_hint || 'saved key'})` : 'Not configured';
+    if (whisperHint) whisperHint.textContent = d.whisper_api_configured ? `Configured (${d.whisper_api_key_hint || 'saved key'})` : 'Not configured';
+    updateReadingAsrCredentialPanel();
+  } catch(e) {
+    const status = document.getElementById('readingAsrSettingsStatus');
+    if (status) status.textContent = 'Could not load ASR settings.';
+  }
+}
+
+async function saveReadingAsrSettings() {
+  const status = document.getElementById('readingAsrSettingsStatus');
+  const payload = {
+    openai_api_key: document.getElementById('readingOpenAiKey')?.value.trim() || '',
+    openai_url: document.getElementById('readingOpenAiUrl')?.value.trim() || 'https://api.openai.com/v1/audio/transcriptions',
+    openai_model: document.getElementById('readingOpenAiModel')?.value || 'gpt-4o-transcribe',
+    whisper_api_key: document.getElementById('readingWhisperApiKey')?.value.trim() || '',
+    whisper_api_url: document.getElementById('readingWhisperApiUrl')?.value.trim() || 'https://api.groq.com/openai/v1/audio/transcriptions',
+    whisper_api_model: document.getElementById('readingWhisperApiModel')?.value || 'whisper-large-v3',
+    clear_openai_key: document.getElementById('readingClearOpenAiKey')?.checked || false,
+    clear_whisper_api_key: document.getElementById('readingClearWhisperApiKey')?.checked || false,
+  };
+  if (status) status.textContent = 'Saving...';
+  try {
+    const r = await fetch('/api/reading/asr_settings', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'Save failed');
+    const openAiKey = document.getElementById('readingOpenAiKey');
+    const whisperKey = document.getElementById('readingWhisperApiKey');
+    if (openAiKey) openAiKey.value = '';
+    if (whisperKey) whisperKey.value = '';
+    const clearOpenAi = document.getElementById('readingClearOpenAiKey');
+    const clearWhisper = document.getElementById('readingClearWhisperApiKey');
+    if (clearOpenAi) clearOpenAi.checked = false;
+    if (clearWhisper) clearWhisper.checked = false;
+    if (status) status.textContent = 'Saved.';
+    await loadReadingAsrSettings();
+    await loadReadingAsrStatus();
+  } catch(e) {
+    if (status) status.textContent = 'Save failed: ' + e.message;
+  }
 }
 
 async function loadReadingAsrStatus() {
   const el = document.getElementById('readingAsrStatus');
   if (!el) return;
+  updateReadingAsrCredentialPanel();
   try {
     const r = await fetch('/api/reading/asr_status');
     const d = await r.json();
     const setup = document.getElementById('readingAsrSetup');
-    if (setup) setup.style.display = d.configured ? 'none' : 'block';
-    el.innerHTML = d.configured
-      ? `<b style="color:var(--teal-dark)">Tamil ASR ready.</b> Engine: ${d.engine}${d.model ? ' · '+d.model : ''}`
-      : `<b style="color:var(--amber)">Tamil ASR not configured yet.</b> Recorded audio cannot be transcribed until a Tamil ASR engine is connected on the server. You can still test the scoring logic by pasting a Tamil transcript in the manual fallback box.`;
+    const mode = document.getElementById('readingAsrMode')?.value || 'auto';
+    const modeStatus = mode === 'openai'
+      ? {ready: d.openai_configured, label: `OpenAI API${d.openai_model ? ' · ' + d.openai_model : ''}`}
+      : mode === 'groq_large_v3'
+        ? {ready: d.whisper_api_configured, label: `Groq Whisper Large V3 · ${d.groq_large_v3_model || 'whisper-large-v3'}`}
+        : mode === 'groq_large_v3_turbo'
+          ? {ready: d.whisper_api_configured, label: `Groq Whisper Large V3 Turbo · ${d.groq_large_v3_turbo_model || 'whisper-large-v3-turbo'}`}
+          : mode === 'whisper_api'
+            ? {ready: d.whisper_api_configured, label: `Custom Whisper API${d.whisper_api_model ? ' · ' + d.whisper_api_model : ''}`}
+        : {ready: d.configured, label: `${d.engine}${d.model ? ' · ' + d.model : ''}`};
+    if (setup) setup.style.display = modeStatus.ready ? 'none' : 'block';
+    el.innerHTML = modeStatus.ready
+      ? `<b style="color:var(--teal-dark)">Tamil ASR ready.</b> Engine: ${escapeHtml(modeStatus.label)}`
+      : `<b style="color:var(--amber)">Tamil ASR not configured for this mode.</b> ${escapeHtml(modeStatus.label)} needs server setup. You can still test scoring by pasting a Tamil transcript.`;
   } catch(e) {
     el.textContent = 'Could not check ASR status.';
   }
@@ -5625,6 +5775,7 @@ async function submitReadingAttempt() {
   fd.append('student_name', document.getElementById('readingStudent').value.trim());
   fd.append('grade', document.getElementById('readingGrade').value);
   fd.append('strictness', document.getElementById('readingStrictness').value);
+  fd.append('asr_mode', document.getElementById('readingAsrMode')?.value || 'auto');
   fd.append('passage_text', document.getElementById('readingPassage').textContent);
   document.getElementById('readingStatus').textContent = 'Transcribing and scoring Tamil reading…';
   const r = await fetch('/api/reading/submit', {method:'POST', body:fd});

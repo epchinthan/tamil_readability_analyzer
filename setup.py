@@ -309,18 +309,19 @@ pause
         print("✓ Launcher present: start.bat")
 
 
-def install_reading_asr(model: str = "small"):
+def install_reading_asr(model: str = "large-v3"):
     """Best-effort installer for offline Tamil Reading Practice ASR."""
-    model = (model or "small").strip().lower()
-    allowed = {"base", "small", "medium"}
+    model = (model or "large-v3").strip().lower()
+    allowed = {"base", "small", "medium", "large", "large-v2", "large-v3"}
     if model not in allowed:
         print(f"⚠ Unknown model '{model}'. Use one of: {', '.join(sorted(allowed))}.")
-        model = "small"
+        model = "large-v3"
 
     print("\nInstalling optional Reading Practice ASR")
     print(f"Model: {model} (multilingual, suitable for Tamil)")
 
-    if apt_available():
+    missing = [c for c in ["git", "cmake", "ffmpeg"] if not is_cmd(c)]
+    if apt_available() and missing:
         print("\nInstalling Ubuntu build/audio tools")
         cmd = "sudo apt-get update && sudo apt-get install -y git cmake build-essential ffmpeg"
         result = run(cmd, shell=True, capture=False)
@@ -328,12 +329,10 @@ def install_reading_asr(model: str = "small"):
             print("⚠ Could not install system packages automatically.")
             print("  Please run: sudo apt-get install git cmake build-essential ffmpeg")
             return False
-    else:
-        missing = [c for c in ["git", "cmake", "ffmpeg"] if not is_cmd(c)]
-        if missing:
-            print("⚠ Missing commands:", ", ".join(missing))
-            print("  Install git, cmake, build tools, and ffmpeg first.")
-            return False
+    elif missing:
+        print("⚠ Missing commands:", ", ".join(missing))
+        print("  Install git, cmake, build tools, and ffmpeg first.")
+        return False
 
     tools = ROOT / "tools"
     tools.mkdir(exist_ok=True)

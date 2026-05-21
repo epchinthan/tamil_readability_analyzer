@@ -20,7 +20,7 @@ if ! command -v python3 >/dev/null 2>&1; then
 fi
 
 if [ "${1:-}" = "--install-reading-asr" ]; then
-  MODEL="${2:-small}"
+  MODEL="${2:-large-v3}"
   echo "  Installing optional Tamil Reading Practice ASR engine: whisper.cpp ($MODEL)"
   echo ""
   python3 setup.py --install-reading-asr "$MODEL"
@@ -39,6 +39,9 @@ detect_whisper_cpp() {
 
   if [ -z "${TAMIL_READING_ASR_CMD:-}" ] && [ -z "${WHISPER_CPP_MODEL:-}" ]; then
     for model in \
+      "$SCRIPT_DIR/tools/whisper.cpp/models/ggml-large-v3.bin" \
+      "$SCRIPT_DIR/tools/whisper.cpp/models/ggml-large-v2.bin" \
+      "$SCRIPT_DIR/tools/whisper.cpp/models/ggml-large.bin" \
       "$SCRIPT_DIR/tools/whisper.cpp/models/ggml-medium.bin" \
       "$SCRIPT_DIR/tools/whisper.cpp/models/ggml-small.bin" \
       "$SCRIPT_DIR/tools/whisper.cpp/models/ggml-base.bin"; do
@@ -123,14 +126,23 @@ fi
 
 detect_whisper_cpp
 
+ASR_MODEL="${TAMIL_READING_ASR_MODEL:-large-v3}"
+REQUESTED_WHISPER_MODEL="$SCRIPT_DIR/tools/whisper.cpp/models/ggml-$ASR_MODEL.bin"
+NEED_READING_ASR_INSTALL=0
 if [ -z "${TAMIL_READING_ASR_CMD:-}" ] && { [ -z "${WHISPER_CPP_BIN:-}" ] || [ -z "${WHISPER_CPP_MODEL:-}" ]; }; then
-  ASR_MODEL="${TAMIL_READING_ASR_MODEL:-small}"
+  NEED_READING_ASR_INSTALL=1
+elif [ -n "${TAMIL_READING_ASR_MODEL:-}" ] && [ -z "${TAMIL_READING_ASR_CMD:-}" ] && [ ! -f "$REQUESTED_WHISPER_MODEL" ]; then
+  NEED_READING_ASR_INSTALL=1
+fi
+
+if [ "$NEED_READING_ASR_INSTALL" = "1" ]; then
   echo "  First Reading Practice ASR startup detected."
   echo "  Installing whisper.cpp locally with model: $ASR_MODEL"
   echo "  This can take a while and the files will stay out of Git."
   echo ""
   python3 setup.py --install-reading-asr "$ASR_MODEL"
   echo ""
+  unset WHISPER_CPP_MODEL
   detect_whisper_cpp
 fi
 
@@ -142,8 +154,8 @@ elif [ -n "${WHISPER_CPP_BIN:-}" ] && [ -n "${WHISPER_CPP_MODEL:-}" ]; then
 else
   echo "  ⚠ Tamil Reading Practice ASR is not installed yet."
   echo "    Voice scoring page still opens; manual transcript scoring works."
-  echo "    To install offline ASR on Ubuntu: ./start.sh --install-reading-asr small"
-  echo "    For better quality on stronger machines: ./start.sh --install-reading-asr medium"
+  echo "    To install offline ASR on Ubuntu: ./start.sh --install-reading-asr large-v3"
+  echo "    For faster testing on weaker machines: ./start.sh --install-reading-asr small"
 fi
 
 echo ""
