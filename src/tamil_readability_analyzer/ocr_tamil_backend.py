@@ -26,10 +26,31 @@ TAMIL_RE = re.compile(r"[\u0B80-\u0BFF]+")
 TAMIL_WORD_RE = re.compile(r"[\u0B80-\u0BFF][\u0B80-\u0BFF\u0BCD\u0BBE-\u0BCC\u0BD7]*")
 
 DEFAULT_CONFIGS = [
-    "--oem 3 --psm 6 -c preserve_interword_spaces=1",
     "--oem 3 --psm 3 -c preserve_interword_spaces=1",
+    "--oem 3 --psm 6 -c preserve_interword_spaces=1",
     "--oem 3 --psm 4 -c preserve_interword_spaces=1",
 ]
+
+_NOISY_FRAGMENT_RE = re.compile(
+    r"(?:டட|ணண|ம்மம்|றுறுற|ஆஆ|ஊஊ|[0-9௦-௯]|[A-Za-z])"
+)
+_PURE_CONSONANT_FRAGMENT_RE = re.compile(r"^[க-ஹ]்?$")
+
+
+def _ocr_quality_score(text: str) -> int:
+    """Prefer OCR output with real Tamil words and fewer scan fragments."""
+    words = extract_tamil_words(text)
+    if not words:
+        return -10_000
+    tamil_chars = sum(len(TAMIL_RE.findall(w)[0]) if TAMIL_RE.search(w) else 0 for w in words)
+    short_fragments = sum(
+        1
+        for w in words
+        if len(w) <= 2 or _PURE_CONSONANT_FRAGMENT_RE.fullmatch(w) or _NOISY_FRAGMENT_RE.search(w)
+    )
+    lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
+    line_bonus = sum(1 for line in lines if len(extract_tamil_words(line)) >= 2)
+    return tamil_chars + (len(words) * 2) + (line_bonus * 4) - (short_fragments * 8)
 
 
 def has_tamil(text: str) -> bool:
@@ -95,11 +116,12 @@ def _ocr_image_with_fallbacks(img, timeout: int, min_tamil_words: int = 2) -> st
             continue
         except Exception:
             continue
-        score = len(extract_tamil_words(text))
+        word_count = len(extract_tamil_words(text))
+        score = _ocr_quality_score(text)
         if score > best_score:
             best_text, best_score = text, score
-        if score >= min_tamil_words:
-            return text
+        if word_count < min_tamil_words:
+            continue
     return best_text
 
 
@@ -119,7 +141,11 @@ def ocr_pdf_tamil(
     from PIL import Image
 
     pdf_path = str(pdf_path)
-    dpi = dpi or int(os.environ.get("TAMIL_ANALYZER_OCR_DPI", "300"))
+    # These TN textbook PDFs are print-layout scans. At 300 DPI Tesseract often
+    # reads trim marks and printer metadata as Tamil fragments; 150 DPI keeps
+    # Grade 1 textbook text readable while reducing that noise. Users can still
+    # override this for low-resolution scans.
+    dpi = dpi or int(os.environ.get("TAMIL_ANALYZER_OCR_DPI", "150"))
     timeout = timeout or int(os.environ.get("TAMIL_ANALYZER_OCR_TIMEOUT", "90"))
     env_max = int(os.environ.get("TAMIL_ANALYZER_OCR_MAX_PAGES", "0"))
     max_pages = max_pages if max_pages is not None else env_max

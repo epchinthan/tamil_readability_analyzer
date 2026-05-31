@@ -24,15 +24,7 @@ def generate_shaped_tamil_report_pdf(row, results, distribution, proper_nouns, s
         return html.escape(str(value if value is not None else ''))
 
     def word_html(value):
-        text = str(value if value is not None else '')
-        clusters = []
-        for ch in text:
-            if clusters and ('\u0BBE' <= ch <= '\u0BCD' or ch in {'\u0B82', '\u0B83', '\u0BD7'}):
-                clusters[-1] += ch
-            else:
-                clusters.append(ch)
-        chunks = [''.join(clusters[i:i+6]) for i in range(0, len(clusters), 6)]
-        return '<br>'.join(html.escape(chunk) for chunk in chunks)
+        return html.escape(str(value if value is not None else ''))
 
     def show_pct(value):
         return esc(value if value not in (None, '') else '-')
@@ -45,9 +37,9 @@ def generate_shaped_tamil_report_pdf(row, results, distribution, proper_nouns, s
             shown = shown[:limit]
         if not shown:
             return ''
-        cells = ''.join(f'<span class="word-chip">{word_html(word)}</span>' for word in shown)
+        cells = ''.join(f'<span class="word-chip">{word_html(word)}</span> ' for word in shown)
         note = f'<p class="note">... and {extra:,} more (see Excel export for full list)</p>' if extra else ''
-        return f'<div class="word-grid">{cells}</div>{note}'
+        return f'<div class="word-grid cols-{cols}">{cells}</div>{note}'
 
     overview_rows = [
         ('Total words in book', f"{row['total_words']:,}"),
@@ -191,24 +183,23 @@ def generate_shaped_tamil_report_pdf(row, results, distribution, proper_nouns, s
   .note {{ color:#666; font-size:8.5pt; margin:2pt 0 8pt; }}
   table {{ width:100%; border-collapse:collapse; margin:5pt 0 12pt; page-break-inside:auto; }}
   th, td {{ border:0.35pt solid #bbbbbb; padding:4pt 5pt; vertical-align:top; }}
-  th {{ background:#1D4E89; color:white; font-weight:bold; }}
-  .overview th {{ width:65%; background:#D6EAF8; color:#1a1814; text-align:left; }}
+  th {{ color:#1D4E89; font-weight:bold; border-top:1.1pt solid #1D4E89; }}
+  .overview th {{ width:65%; color:#1a1814; text-align:left; }}
   .overview td {{ width:35%; }}
-  tr:nth-child(even) td, .overview tr:nth-child(even) th {{ background:#F0EDE8; }}
   .numeric td:not(:first-child), .numeric th:not(:first-child) {{ text-align:center; }}
-  .good {{ background:#D4EDDA; }}
-  .mid {{ background:#FFF3CD; }}
-  .hard {{ background:#F8D7DA; }}
-  .word-grid {{ font-size:9pt; line-height:1.8; margin:5pt 0 12pt; }}
-  .word-chip {{ display:inline-block; border:0.35pt solid #d8d8d8; padding:2pt 4pt; margin:1.5pt; background:#fff; overflow-wrap:anywhere; }}
+  .good {{ color:#207245; font-weight:bold; }}
+  .mid {{ color:#8a5d00; font-weight:bold; }}
+  .hard {{ color:#9b1c31; font-weight:bold; }}
+  .word-grid {{ font-size:8.8pt; line-height:1.9; margin:5pt 0 12pt; page-break-inside:auto; }}
+  .word-chip {{ border:0.35pt solid #d8d8d8; padding:1.5pt 4pt; white-space:nowrap; }}
   .para {{ border:0.45pt solid #c9c9c9; padding:7pt; margin:7pt 0; page-break-inside:avoid; }}
   .para h2 {{ margin-top:0; }}
   .para p {{ margin:2pt 0 4pt; }}
   .para ul {{ margin:3pt 0 2pt 14pt; padding:0; }}
   .para-text {{ font-size:11pt; line-height:1.65; margin-top:5pt; }}
-  .para.good {{ background:#E8F5E8; }}
-  .para.mid {{ background:#FFF3CD; }}
-  .para.hard {{ background:#F8D7DA; }}
+  .para.good {{ border-color:#207245; }}
+  .para.mid {{ border-color:#8a5d00; }}
+  .para.hard {{ border-color:#9b1c31; }}
   .page-break {{ page-break-before:always; }}
 </style>
 </head>

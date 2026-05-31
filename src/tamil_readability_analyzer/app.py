@@ -1,4 +1,4 @@
-import os, re, json, random, sqlite3, datetime, io, math, hashlib, threading, logging, uuid, time, zipfile
+import os, re, json, random, sqlite3, datetime, io, math, hashlib, threading, logging, uuid, time, zipfile, subprocess
 from pathlib import Path
 import werkzeug.utils
 from . import analytics as _analytics
@@ -638,6 +638,68 @@ def _fix_common_tamil_ocr_errors(text):
     text = _repair_tamil_ocr_glyph_patterns(text)
     corrections = {
         'நம்பிக்லகக்குரிய': 'நம்பிக்கைக்குரிய',
+        'குமிழ்நாடு': 'தமிழ்நாடு',
+        'துமிழ்நாடு': 'தமிழ்நாடு',
+        'தமிழ்தாடு': 'தமிழ்நாடு',
+        'தமிழ்தாடுஅரசு': 'தமிழ்நாடுஅரசு',
+        'தமிழ்நாடுஅரசு': 'தமிழ்நாடு அரசு',
+        'தமிழ்நாரு': 'தமிழ்நாடு',
+        'வெளிமிடப்பட்டது': 'வெளியிடப்பட்டது',
+        'டுவளிப்படுத்துவர்': 'வெளிப்படுத்துவர்',
+        'நேயபற்ற': 'நேயமற்ற',
+        'பெருங்குற்றயூம்': 'பெருங்குற்றமும்',
+        'மூதல்பதிப்பு': 'முதல் பதிப்பு',
+        'பற்றும்': 'மற்றும்',
+        'பமிற்சி': 'பயிற்சி',
+        'பசீ': 'பசி',
+        'மொழியோடூ': 'மொழியோடு',
+        'விளையாடூ': 'விளையாடு',
+        'தறாச்சி': 'திருச்சி',
+        'விளையாட்ரூகளை': 'விளையாட்டுகளை',
+        'விளையாட்ருகளை': 'விளையாட்டுகளை',
+        'விளையாட்ரு': 'விளையாட்டு',
+        'விளையாருவாய்': 'விளையாடுவாய்',
+        'விளையாருவோம்': 'விளையாடுவோம்',
+        'செய்துபார்': 'செய்து பார்',
+        'முயன்றுபார்': 'முயன்று பார்',
+        'வட்டமிருக': 'வட்டமிடுக',
+        'வண்ணமிருக': 'வண்ணமிடுக',
+        'வண்ணமிட்ரு': 'வண்ணமிடு',
+        'கைதட்ரு': 'கைத்தட்டு',
+        'தட்ரு': 'தட்டு',
+        'தீட்ருக': 'தீட்டுக',
+        'கொருக்கப்பட்ருள்ள': 'கொடுக்கப்பட்டுள்ள',
+        'அச்சிடப்பட்ரூள்ளது': 'அச்சிடப்பட்டுள்ளது',
+        'பொட்ருகள்': 'பொருட்கள்',
+        'பொட்ருகளை': 'பொருட்களை',
+        'மட்ரும்': 'மற்றும்',
+        'மிரூந்தவை': 'இருந்தவை',
+        'எருத்துக்காட்ரு': 'எடுத்துக்காட்டு',
+        'தளரயின்': 'தரையின்',
+        'அருக்கின்': 'அடுக்கின்',
+        'பகை்கும்': 'பறக்கும்',
+        'பகை்க': 'பறக்க',
+        'பட்டியலிருக': 'பட்டியலிடுக',
+        'கூருதலாக': 'கூடுதலாக',
+        'தேர்ந்தெருத்தாய்': 'தேர்ந்தெடுத்தாய்',
+        'கொருக்கும்': 'கொடுக்கும்',
+        'கொருக்கிறான்': 'கொடுக்கிறான்',
+        'ரூறிப்புகளின்': 'குறிப்புகளின்',
+        'இட்ரு': 'இட்டு',
+        'தொட்ரு': 'தொட்டு',
+        'எட்ரு': 'எட்டு',
+        'ஒட்ரு': 'ஒட்டு',
+        'கேட்ரு': 'கேட்டு',
+        'கேட்ரூ': 'கேட்டு',
+        'தட்ரூவதால்': 'தட்டுவதால்',
+        'தகைதட்ரூ': 'கைத்தட்டு',
+        'சாக்லேட்ருகளும்': 'சாக்லேட்டுகளும்',
+        'சாக்லேட்ரடுகளும்': 'சாக்லேட்டுகளும்',
+        'பீட்ரூ': 'பீட்ரூட்',
+        'காடுக்கப்பட்டுள்ள': 'கொடுக்கப்பட்டுள்ள',
+        'பயன்பருத்தி': 'பயன்படுத்தி',
+        'செயல்பாரு': 'செயல்பாடு',
+        'பமலடை': 'பழமடை',
         'ஆசிரியர்கநள': 'ஆசிரியர்களே',
         'வகுப்பலைலய': 'வகுப்பறையை',
         'ந்நயமிக்க': 'நயமிக்க',
@@ -712,6 +774,7 @@ def _fix_common_tamil_ocr_errors(text):
         'வடிவரமப்பு': 'வடிவமைப்பு',
         'பபாருள்': 'பொருள்',
         'மபாருள்': 'பொருள்',
+        'பபருக்கம்': 'பெருக்கம்',
         'மறறும்': 'மற்றும்',
         'குழநரதைகளின்': 'குழந்தைகளின்',
         'உைவியல்': 'உளவியல்',
@@ -778,8 +841,61 @@ def _fix_common_tamil_ocr_errors(text):
     }
     for wrong, right in corrections.items():
         text = text.replace(wrong, right)
+
+    recurring_root_corrections = [
+        ('அழைக்கப்பரு', 'அழைக்கப்படு'),
+        ('காணப்பரு', 'காணப்படு'),
+        ('எனப்பரு', 'எனப்படு'),
+        ('தேவைப்பரு', 'தேவைப்படு'),
+        ('ஏற்பரு', 'ஏற்படு'),
+        ('வகுபரு', 'வகுபடு'),
+        ('பெறப்பரு', 'பெறப்படு'),
+        ('செயல்பரு', 'செயல்படு'),
+        ('செய்யப்பரு', 'செய்யப்படு'),
+        ('கருதப்பரு', 'கருதப்படு'),
+        ('பாதுகாக்கப்பரு', 'பாதுகாக்கப்படு'),
+        ('தயாரிக்கப்பரு', 'தயாரிக்கப்படு'),
+        ('வளர்க்கப்பரு', 'வளர்க்கப்படு'),
+        ('கொண்டாடப்பரு', 'கொண்டாடப்படு'),
+        ('பயன்பருத்த', 'பயன்படுத்த'),
+        ('வகைப்பருத்த', 'வகைப்படுத்த'),
+        ('வேறுபருத்த', 'வேறுபடுத்த'),
+        ('அட்டவணைப்பருத்த', 'அட்டவணைப்படுத்த'),
+        ('ஏற்பருத்த', 'ஏற்படுத்த'),
+        ('கொருக்கப்பட்ட', 'கொடுக்கப்பட்ட'),
+        ('கொருக்கப்பட்ரூ', 'கொடுக்கப்பட்டு'),
+        ('கொருக்க', 'கொடுக்க'),
+        ('எருத்துக்காட்ரூ', 'எடுத்துக்காட்டு'),
+        ('எருத்துக்காட்ர', 'எடுத்துக்காட்டு'),
+        ('எடூத்துக்காட்டூ', 'எடுத்துக்காட்டு'),
+        ('எடூத்துக்காட்டு', 'எடுத்துக்காட்டு'),
+        ('எருத்துக்காட்டு', 'எடுத்துக்காட்டு'),
+        ('எருத்துக்கொள்ள', 'எடுத்துக்கொள்ள'),
+        ('எருத்துக்கொள்', 'எடுத்துக்கொள்'),
+        ('மட்ருமே', 'மட்டுமே'),
+        ('கூட்ருக', 'கூறுக'),
+    ]
+    for wrong, right in recurring_root_corrections:
+        text = text.replace(wrong, right)
+
+    text = text.replace('ப்பருத்த', 'ப்படுத்த')
+    text = text.replace('ப்பரு', 'ப்படு')
+    text = text.replace('முப்படுவ', 'முப்பருவ')
+    text = text.replace('எருத்து', 'எடுத்து')
+    text = text.replace('ட்ரூ', 'ட்டு')
+    text = text.replace('ட்ரு', 'ட்டு')
+    text = text.replace('கொண்ரு', 'கொண்டு')
+
+    text = re.sub(r'தங்கி\s*யிருந்த', 'தங்கியிருந்த', text)
+    text = re.sub(r'தங்கியி\s*[\*•·]?\s*ருந்த', 'தங்கியிருந்த', text)
+    text = re.sub(r'அமைந்\s*துள்ளது', 'அமைந்துள்ளது', text)
+    text = re.sub(r'அமைந்\s*உள்ளது', 'அமைந்துள்ளது', text)
+    text = re.sub(r'(?<![\u0B80-\u0BFF])ரண்டு(?![\u0B80-\u0BFF])', 'இரண்டு', text)
+    text = re.sub(r'இ{2,}ரண்டும்', 'இரண்டும்', text)
+    text = re.sub(r'இ{2,}ரண்டு', 'இரண்டு', text)
     whole_word_corrections = {
         'பாடல': 'பாடல்',
+        'ருந்து': 'இருந்து',
     }
     for wrong, right in whole_word_corrections.items():
         text = re.sub(rf'(?<![\u0B80-\u0BFF]){re.escape(wrong)}(?![\u0B80-\u0BFF])', right, text)
@@ -859,6 +975,25 @@ def extract_text(filepath, ocr_backend=None):
             _fwmod.update_file_stage(fname, stage, detail)
         except Exception:
             pass
+
+    # Strategy 0: poppler's pdftotext is often best for modern Google Docs /
+    # Skia PDFs. It preserves Tamil Unicode cleanly and avoids unnecessary OCR.
+    try:
+        proc = subprocess.run(
+            ['pdftotext', '-layout', filepath, '-'],
+            text=True,
+            capture_output=True,
+            timeout=30,
+        )
+        text0 = proc.stdout or ''
+        if proc.returncode == 0 and re.search(r'[\u0B80-\u0BFF]{2,}', text0):
+            if not _looks_like_poor_tamil_extraction(text0):
+                _tamil_found = True
+                _stage('done', 'text extracted (pdftotext)')
+                return _normalize_tamil_text(text0)
+            has_any_text = True
+    except Exception as e:
+        logging.getLogger('app').debug(f'pdftotext failed {fname}: {e}')
 
     # Strategy 1: pdfminer page-by-page
     try:
@@ -1156,6 +1291,7 @@ def extract_text(filepath, ocr_backend=None):
 # Sandhi liaison consonants that appear only at word boundaries, never as
 # meaningful word endings: த், க், ச், ட், ப்
 _SANDHI_LIAISON = re.compile(r'[தகசடப]்$')
+_KEEP_FINAL_PULLI_WORDS = {'பீட்ரூட்', 'சாக்லேட்'}
 
 # Common connective words that merge with the preceding word in some texts:
 # வந்தபோது ↔ வந்த போது
@@ -1164,12 +1300,369 @@ _COMPOUND_JOINERS = [
     'என்பது','இருந்தும்','கொண்டு','கொண்ட',
 ]
 
+_COMMON_SHORT_TAMIL_WORDS = {
+    'அது','இது','எது','என்','உன்','நம்','நீ','ஆம்','ஓர்','ஒரு',
+    'ஆடு',
+}
+_IGNORE_WORDS_DIR = REPO_ROOT / 'data' / 'ignore_words'
+_IGNORE_WORDS_CACHE = None
+
+def _load_ignore_words():
+    """Load exact token ignores from data/ignore_words/*.txt."""
+    global _IGNORE_WORDS_CACHE
+    if _IGNORE_WORDS_CACHE is not None:
+        return _IGNORE_WORDS_CACHE
+
+    words = set()
+    if _IGNORE_WORDS_DIR.exists():
+        for path in sorted(_IGNORE_WORDS_DIR.glob('*.txt')):
+            try:
+                for line in path.read_text(encoding='utf-8').splitlines():
+                    word = line.strip()
+                    if word and not word.startswith('#'):
+                        words.add(word)
+            except Exception:
+                continue
+    _IGNORE_WORDS_CACHE = words
+    return words
+
+_OCR_NOISE_EXACT_TOKENS = {
+    # Printer/credits-page fragments and recurring hallucinations seen in TN
+    # textbook OCR. These are not useful for readability vocabulary imports.
+    'ஆர்','எம்','எஸ்','பப்ளி','எலிகண்','மேப்லித்தோ','ஆப்செ',
+    'நடக','ராணபடராவமிக்ம','இறு','மடவ','கபபுராபடிம்',
+    'காபபராபுடிம்','வடகாபபராபடிம்','ஈஷினி','நல்லகானகொத்தப்பள்ளி',
+    'வார்ரூ','தஞ்சாவூழ்','ஊஞ்சி','இனோவேலஷன்ஸ்','அழிவிடைதாங்கி',
+    'நிபள்ளி','ஹைதராபா','எஜயஸ்ரீ','இந்த்த்த','ஸ்ம','வல்ல்ரி',
+    'ந்தி','ஷ்ய','ப்வலகாறனயதயம்','தயறறயில',
+    'ம்','ம்ம','ர்க','ரர்','ர்ர','ப்ப','ப்பி','ப்பர்','ட்ட','ட்டி',
+    'த்த','தது','ங்க','ச்ச','க்க','ப்ர','ஸ்ர','ர்வ','ர்ல','ரல்',
+    'ரின்','பர்','பம்','ரம்','சர்','டர்','நர்','லர்','ர்க்',
+    'கலு','ராடு','ருந்த','யிருந்த','தங்கியி','அமைந்','துள்ளது',
+    'சசொர்ற','மவ்லவி','டபாண','நகரக','படப்பட','ரப்பி','பேயி','நலிய',
+    'ஓரகிரியிகங்ற','ராபா','உர்வா','சிரிரகா','இருளநதத','காவடபஸ்டோ',
+    'ர்ரக','ரீஸ்','வர்பர்','ஈலர்','கக்கி','வர்ற','எரர்',
+    'ரிக','றிஷ','றிஸ','டயம்','டார்','ஈர்ர்ட','ர்ரகா','சரய',
+    'ரபாக','சமூ','மயி','கலே','ரகச','ர்ா','யடி','ர்ங','ஆசு',
+    'ரில','கப்ப','ட்சர்','ரகா','றசரர்','ஈரி','டேர்','பிய',
+    'ரிரார்','சர்ச','க்ர்ர்ச','எசா','வுயார்ச','ரிஸ்','எ்சாக',
+    'னன்ன','ஈமு','ரோக','ர்ராசச','ர்ர்கர்','உமாச','டமா','நுபோ',
+    'ரீரசாம்','நர்மர்','ளாயே','ரிரபகி','ட்கர்','ஈவாம்','ரிர்சீரிாசர்',
+    'சரர்சா','ரீரமர்','ஜொககர','புரிர்ர்க','கர்யார்','ார்ஈ',
+    'எபிலாடு','ர்ந்வார்','ர்உா்','ொர்ர்','ழ்ர்டா','ரொம்','ர்வ',
+    'மே்','ளாகாஉ','ரீயாயிடி','ச்ஞு','ரீகாமிடு','ரீா','ொய்டராசர்',
+    'ரொயாசசொம','ொர்','மீர்ர்ச','ரலாபீடு','கங்ஸ','ரர்கீரய',
+    'காறுளடாணப','ரிரிள்','ஏார்ரடர்சா','ஈர்ர்சா','க்க்ரூ',
+    'ரீயாயிடு','ரீயாபிட','ர்ரஊா','பபுசகர்','நிக்ரா','ராரீளா',
+    'ராரொரே','ரீயரீர்சா','ரீளாவிடி','ரீகாப்டி','ரராயிடி',
+    'ரீரர்ர்சா','ரீலாபடி','ரீபாப்டு','நடிறிஷு','ரியர்கயாகே',
+    'நள்பாக','ர்காமிர','ரீகர்ர்சா','ரீவாரிடு','சபிளொகா',
+    'ர்ந்சா','ஈரிராக','நாசர்யாக','டாரீ','விரீரளளர்','மாகர்ஈகாக',
+    'உரீயாயிட','ரீரோரி','பிரீர்சாளார்','ரியாபிடு','ச்ர்ு',
+    'ச்ர்','ரியாயிடு','ரீயாபிட','வண்சர்','ர்யர்ரன்','குருயாச',
+    'பர்டமு','ரர்ே','யிர்பாச','அடுயுபு','பவாடி','கார்ஈ',
+    'ப்ரரம்சர்','ஈ்கர்','யார்ர்','ர்ஈ்ருபோ','கொடர்ர்வு',
+    'ர்க்கர்ர்டர்ர்ச','நர்சர்யாச','எர்கரிரர்','ற்ள்பாக','ளடரணப',
+    'க்ளு','டுுர்ரம்பர்ச','ஐிரர்பாக','ஈரர்ஈ்காக','ர்ர்வா',
+    'றாரர்ஈகாட','ரரம்ச','உர்ர்சய்லு','ங்ஙூ','புயர்சா',
+    'பரர்சா','௱ரர்ார','௱ரர்ர','ர்ர்ர்படயாம்','ளொர்ர்',
+    'ரசயர்ச','ரீர்ச','ர்நனு','மர்ப்வக','ஸ்வடைவை','போோபா',
+    'நர்வம்சா','கவணவிம்','வீரீரதுபஸ்','பய்டாவிடி','வீரிசிகம்ஷ',
+    'இயபிய்விம்','ஜூவயராம','யாப்வ','நேரவ்','யாவர்பிமதகர',
+    'ரிய்றயகா','க்லகரப்்றமாவர','ர்ப்றயவட','௰்யவ்ற','செ்பக்வரா',
+    'ஜேள்ப்றயாவட','ஈபிவியயறகைட','நண்டாகயாவவில்','ரவமிதிர்',
+    'ரகேயிர','மேசாபமசாம்','யோட்விஸரயட','ட்டாட்டாப','வேவப்விவியம',
+    'வப்விவியம','நதோகனவயும்','ப்ஸுகரு','வெப்கஷர்','விஷிவவி',
+    'மட்ஷஸமப்ட','பமியமவிவ்றன','பிவியாயமிம்','மெம்யயாஞ்சமய',
+    'வயடியபய','ஒ்றனயாமயரியம','சஙிவகாவாம','யரண்ர்மய',
+    'நோர்பிம்','ரவோர்வி','வடக்பிகியம்வர','நண்ப்சம்',
+}
+_OCR_NOISE_LINE_RE = re.compile(
+    r'(?:'
+    r'ஜி\.?\s*எஸ்|எலிகண்ட்|எலிகண்|மேப்லித்|மேப்லி|ஆப்செட்|ஆப்செ|'
+    r'அச்சிட்டோர்|அச்சிடப்பட்டுள்ளது|அச்சிடப்பட்|பப்ளி|பிரைவேட்|'
+    r'லிமிடெட்|இனோவேலஷன்ஸ்|ஹைதராபா|தஞ்சாவூழ்|நிபள்ளி'
+    r')'
+)
+_OCR_NOISE_TOKEN_RE = re.compile(
+    r'(?:டட|ட்ப|டண்|ணண|ம்மம்|றுறுற|ஆஆ|ஊஊ|வஷ்|பப்ப|பண்ன|ப்ய்ப்சய|'
+    r'ரமப|மேவா|ராமம்|டமெ|கண்டர|டாணா|பபப|ததத|ரரி|ராயா|வமணல|'
+    r'ராரா|மாரா|ராவு|பரீ|ரிழா|பாழா|ரரிடபா|ஆ்தரரி|அருக்குவாய்|'
+    r'உர்ணாறிடுட|வ்ய்யா|நெண்னர்|ரபமபரவைசபமேயன|கிபமிய|பமத்தை|'
+    r'பம்மி|பமடம்|பமல|இறுறு|ஞ்ஸூ|ஸ்ஷ|யயய|சரகக|ககக|கக்கக்க|'
+    r'மமம்|மமமம|ககக்தல்|[A-Za-z])'
+)
+_PURE_PULLI_FRAGMENT_RE = re.compile(r'^[க-ஹ]்$')
+_TAMIL_DEPENDENT_MARKS_RE = re.compile(r'[\u0BBE-\u0BCC\u0BCD\u0BD7]')
+_TAMIL_INDEPENDENT_VOWELS = 'அஆஇஈஉஊஎஏஐஒஓஔ'
+_RAW_OCR_PAGE_MARKER_RE = re.compile(r'(?m)^=+\s*PAGE\s+(\d+)\s*=+\s*$')
+
+def _remove_tamil_textbook_noise_lines(text):
+    """Drop publication/printer OCR lines before token extraction."""
+    kept = []
+    skip_following = 0
+    for line in (text or '').splitlines():
+        stripped = line.strip()
+        if skip_following:
+            if _RAW_OCR_PAGE_MARKER_RE.fullmatch(stripped):
+                skip_following = 0
+            else:
+                skip_following -= 1
+                continue
+        if _OCR_NOISE_LINE_RE.search(stripped):
+            if 'அச்சிட்டோர்' in stripped:
+                skip_following = 4
+            continue
+        kept.append(line)
+    return '\n'.join(kept)
+
+_TEXTBOOK_NON_CONTENT_PAGE_RE = re.compile(
+    r'(?:'
+    r'தமிழ்நாடு அரசு|விலையில்லா(?:ப்)? பாடநூல்|விலையில்லா|'
+    r'முதல் பதிப்பு|முதல்பதிப்பு|திருத்திய பதிப்பு|மறுபதிப்பு|'
+    r'விற்பனைக்கு அன்று|வெளியிடப்பட்டது|புதிய பாடத்திட்ட|'
+    r'பாடநூல் உருவாக்க|பாடநூல்‌ உருவாக்க|பாடநூல் மற்றும் கல்வியியல்|'
+    r'தமிழ்நாடு பாடநூல்|மாநிலக் கல்வியியல்|தொகுப்பும்|தொகுப்பு|'
+    r'முகவுரை|பொருளடக்கம்|நாட்டுப்பண்|தமிழ்த்தாய்|உறுதிமொழி|'
+    r'ஆசிரியர்களே|கற்றல் விளைவுகள்|கற்றல்‌ விளைவுகள்|'
+    r'மேலாய்வாளர்|மேலாய்வாளர்கள்|மேலாய்வாளர்குழு|நூலாசிரியர்|நூலாசிரியர்கள்|'
+    r'ஒருங்கிணைப்பாளர்|ஒருங்கிணைப்பாளர்கள்|வல்லுநர்|தலைமை ஒருங்கிணைப்பாளர்|'
+    r'தட்டச்சு|ஓவியம்|வரைபடம்|அட்டைப்படம்|'
+    r'அச்சிட்டோர்|ஆப்செட்|பதிப்பகம்|அச்சிடப்பட்டுள்ளது|'
+    r'ISBN|www\.tntextbooks|tntextbooks'
+    r')',
+    re.IGNORECASE,
+)
+_TEXTBOOK_CONTENT_PAGE_RE = re.compile(
+    r'(?:'
+    r'பயிற்சி|செயல்பாடு|செய்து பார்|பேசி மகிழ்வோம்|எழுதி|எழுதுவோம்|'
+    r'படிப்போம்|பாடம்|வினா|விடை|கற்போம்|அறிவோம்|வண்ணமிட|'
+    r'பொருத்த|கண்டுபிடி|வட்டமிட|வரை|கதை|பாடல்'
+    r')'
+)
+_TEACHER_GUIDANCE_HEADING_RE = re.compile(
+    r'(?:'
+    r'நம்பிக்கைக்குரிய\s*ஆசிரியர்களே|'
+    r'ஆசிரியருக்கான\s*குறிப்பு|'
+    r'ஆசிரியர்களுக்கான\s*குறிப்பு|'
+    r'ஆசிரியர்\s*குறிப்பு|'
+    r'ஆசிரியர்களே'
+    r')'
+)
+_TEACHER_GUIDANCE_CONTINUE_RE = re.compile(
+    r'(?:'
+    r'ஆசிரியர்|ஆசிரியர்கள்|மாணவர்|மாணவர்கள்|மாணவர்களை|மாணவர்களுக்கு|'
+    r'குழந்தைகள்|குழந்தைகளை|அறிவுறுத்த|அறிமுகப்படுத்த|வலியுறுத்த|'
+    r'வழிகாட்ட|வாய்ப்பு|வாய்ப்புகள்|புனைந்து|பாடலாம்|கேட்கவும்|'
+    r'செய்யுமாறு|செய்யலாம்|பயன்படுத்தி|வலுப்படுத்தலாம்'
+    r')'
+)
+_STUDENT_SECTION_HEADING_RE = re.compile(
+    r'(?:'
+    r'கற்றல்|செய்து\s*பார்|முயன்று\s*பார்|பயிற்சி|செயல்பாடு|'
+    r'எழுதுக|எழுதுவோம்|படிப்போம்|பாடல்கள்|பாடல்|புதிர்|கதைகள்|கதை|'
+    r'வண்ணமிடுவோம்|வண்ணமிடுக|பொருத்துக|வட்டமிடுக|நிரப்புக|'
+    r'எழுத்து|எழுத்துகள்|சொல்வோம்|பார்ப்போம்'
+    r')'
+)
+
+def _is_non_content_textbook_page(page_text, page_no=None, total_pages=None):
+    """Heuristic skip for title, intro, contents, credits, and printer pages."""
+    text = _normalize_tamil_text(page_text or '')
+    compact = re.sub(r'\s+', ' ', text).strip()
+    if not compact:
+        return False
+
+    hits = len(_TEXTBOOK_NON_CONTENT_PAGE_RE.findall(compact))
+    has_content = bool(_TEXTBOOK_CONTENT_PAGE_RE.search(compact))
+    tamil_words = re.findall(r'[\u0B80-\u0BFF]{2,}', compact)
+    word_count = len(tamil_words)
+
+    if hits >= 2:
+        return True
+    if hits and not has_content:
+        return True
+
+    near_front = page_no is not None and page_no <= 12
+    near_back = (
+        page_no is not None
+        and total_pages
+        and total_pages >= 12
+        and page_no >= max(total_pages - 5, 1)
+    )
+    if hits and (near_front or near_back):
+        return True
+
+    if near_front and word_count <= 35 and re.search(r'(?:வகுப்பு|பருவம்|தமிழ்|கணக்கு|அறிவியல்|சமூக)', compact):
+        return True
+    if near_back and not has_content and word_count <= 220:
+        return True
+    return False
+
+def _line_tamil_token_count(line):
+    return len(re.findall(r'[\u0B80-\u0BFF]{2,}', line or ''))
+
+def _is_teacher_guidance_heading(line, next_line=''):
+    current = (line or '').strip()
+    nxt = (next_line or '').strip()
+    if _TEACHER_GUIDANCE_HEADING_RE.search(current):
+        return True
+    if current in {'ஆசிரியருக்கான', 'ஆசிரியர்களுக்கான', 'ஆசிரியர்'}:
+        joined = f'{current} {nxt}'.strip()
+        return bool(_TEACHER_GUIDANCE_HEADING_RE.search(joined))
+    return False
+
+def _is_student_section_heading(line, next_line=''):
+    current = (line or '').strip()
+    nxt = (next_line or '').strip()
+    if _STUDENT_SECTION_HEADING_RE.search(current):
+        return True
+    if current in {'செய்து', 'முயன்று', 'எழுதிப்', 'எழுதி'}:
+        return bool(_STUDENT_SECTION_HEADING_RE.search(f'{current} {nxt}'.strip()))
+    return False
+
+def _remove_teacher_guidance_sections(text):
+    """Drop explicit teacher-only note blocks before vocabulary extraction."""
+    lines = (text or '').splitlines()
+    if not lines:
+        return text or ''
+
+    token_lines = [line for line in lines if _line_tamil_token_count(line)]
+    word_per_line = bool(token_lines) and (
+        sum(_line_tamil_token_count(line) for line in token_lines) / max(len(token_lines), 1)
+    ) <= 1.4
+
+    kept = []
+    skip = False
+    skip_budget = 0
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        next_one = lines[index + 1].strip() if index + 1 < len(lines) else ''
+        next_two = lines[index + 2].strip() if index + 2 < len(lines) else ''
+        window = ' '.join(part for part in [stripped, next_one, next_two] if part)
+
+        if _RAW_OCR_PAGE_MARKER_RE.fullmatch(stripped):
+            skip = False
+            skip_budget = 0
+            kept.append(line)
+            continue
+
+        if _is_teacher_guidance_heading(stripped, next_one):
+            skip = True
+            skip_budget = 18 if word_per_line else 8
+            continue
+
+        if skip:
+            if _is_student_section_heading(stripped, next_one):
+                skip = False
+                skip_budget = 0
+                kept.append(line)
+                continue
+            if not stripped:
+                skip = False
+                skip_budget = 0
+                kept.append(line)
+                continue
+
+            skip_budget -= max(_line_tamil_token_count(stripped), 1)
+            if skip_budget <= 0 and not _TEACHER_GUIDANCE_CONTINUE_RE.search(window):
+                skip = False
+            continue
+
+        kept.append(line)
+    return '\n'.join(kept)
+
+def _iter_raw_ocr_pages(text):
+    """Yield (page_no, text) blocks from raw OCR dumps with PAGE markers."""
+    text = text or ''
+    matches = list(_RAW_OCR_PAGE_MARKER_RE.finditer(text))
+    if not matches:
+        yield None, text
+        return
+    prefix = text[:matches[0].start()].strip()
+    if prefix:
+        yield None, prefix
+    total = len(matches)
+    for idx, match in enumerate(matches):
+        start = match.end()
+        end = matches[idx + 1].start() if idx + 1 < total else len(text)
+        try:
+            page_no = int(match.group(1))
+        except Exception:
+            page_no = None
+        yield page_no, text[start:end]
+
+def _is_malformed_tamil_token(word):
+    """Catch impossible Unicode shapes produced by OCR/random generators."""
+    word = (word or '').strip()
+    if not word:
+        return True
+    if _TAMIL_DEPENDENT_MARKS_RE.match(word):
+        return True
+    if re.search(r'[\u0BBE-\u0BCC\u0BD7]{2,}', word):
+        return True
+    if re.search(r'\u0BCD[\u0BBE-\u0BCC\u0BD7]', word):
+        return True
+    if re.search(r'\u0BCD[' + _TAMIL_INDEPENDENT_VOWELS + r']', word):
+        return True
+    if re.search(r'[' + _TAMIL_INDEPENDENT_VOWELS + r'][\u0BBE-\u0BCC\u0BD7]', word):
+        return True
+    if re.search(r'^[கஙசஞடணதநபமயரலவழளறன]்[க-ஹ]', word):
+        return True
+    return False
+
+def _is_low_quality_ocr_page(page_text):
+    """Reject mostly-garbled OCR pages that otherwise become random words."""
+    text = _normalize_tamil_text(page_text or '')
+    if not text.strip():
+        return True
+    tamil_tokens = re.findall(r'[\u0B80-\u0BFF]{2,}', text)
+    if not tamil_tokens:
+        return True
+
+    useful = [w for w in tamil_tokens if _is_useful_tamil_ocr_token(_normalize_word(w))]
+    malformed = sum(1 for w in tamil_tokens if _is_malformed_tamil_token(w))
+    ascii_digit_count = len(re.findall(r'[A-Za-z0-9\u0BE6-\u0BEF]', text))
+    tamil_char_count = len(re.findall(r'[\u0B80-\u0BFF]', text))
+    token_count = len(tamil_tokens)
+    useful_ratio = len(useful) / max(token_count, 1)
+    malformed_ratio = malformed / max(token_count, 1)
+    ascii_ratio = ascii_digit_count / max(tamil_char_count, 1)
+
+    if len(useful) < 10 and (ascii_digit_count > 20 or malformed_ratio >= 0.25):
+        return True
+    if token_count >= 8 and useful_ratio < 0.35:
+        return True
+    if token_count >= 120 and useful_ratio < 0.45 and ascii_ratio >= 0.25:
+        return True
+    if ascii_ratio >= 0.55 and len(useful) < 80:
+        return True
+    if malformed_ratio >= 0.35:
+        return True
+    return False
+
+def _remove_low_quality_ocr_pages(text):
+    """Drop raw OCR PAGE blocks that are publication pages or scan garbage."""
+    kept = []
+    pages = list(_iter_raw_ocr_pages(text or ''))
+    total_pages = sum(1 for page_no, _ in pages if page_no is not None) or None
+    for page_no, page_text in pages:
+        if page_no is not None and (
+            _is_non_content_textbook_page(page_text, page_no=page_no, total_pages=total_pages)
+            or _is_low_quality_ocr_page(page_text)
+        ):
+            continue
+        kept.append(page_text)
+    return '\n'.join(kept)
+
 def _normalize_word(word):
     """
     Strip trailing sandhi liaison consonants and return the clean stem input.
     அவனைத் → அவனை,  அவனைக் → அவனை,  நன்மைக் → நன்மை
     Words ending in ன்/ம்/ர்/ல் etc. are NOT touched — those are real endings.
     """
+    if word in _KEEP_FINAL_PULLI_WORDS:
+        return word
     if _SANDHI_LIAISON.search(word) and len(word) > 2:
         return word[:-2]
     return word
@@ -1187,6 +1680,45 @@ def _split_compound(word):
                 return [prefix, j]
     return [word]
 
+def _is_useful_tamil_ocr_token(word):
+    """Reject OCR fragments while keeping common short Grade 1 Tamil words."""
+    word = (word or '').strip()
+    if not word or not re.search(r'[\u0B80-\u0BFF]', word):
+        return False
+    tamil_part = re.sub(r'[0-9\u0BE6-\u0BEF]', '', word)
+    if not tamil_part:
+        return False
+    if re.search(r'[0-9\u0BE6-\u0BEF]', word) and not re.fullmatch(r'[0-9\u0BE6-\u0BEF]+ஆம்', word):
+        return False
+    if word in _COMMON_SHORT_TAMIL_WORDS:
+        return True
+    if word in _load_ignore_words():
+        return False
+    if word in _OCR_NOISE_EXACT_TOKENS:
+        return False
+    if _is_malformed_tamil_token(tamil_part):
+        return False
+    if re.search(r'[௰௱௲]', word):
+        return False
+    if _PURE_PULLI_FRAGMENT_RE.fullmatch(tamil_part):
+        return False
+    if _OCR_NOISE_TOKEN_RE.search(word):
+        return False
+    pulli_count = tamil_part.count('\u0BCD')
+    if len(tamil_part) <= 4 and pulli_count:
+        return False
+    if pulli_count >= 2 and len(tamil_part) <= 8:
+        return False
+    if len(tamil_part) <= 3 and word not in _COMMON_SHORT_TAMIL_WORDS:
+        return False
+    if len(tamil_part) >= 8:
+        r_like = sum(tamil_part.count(ch) for ch in 'ரற்')
+        if r_like / max(len(tamil_part), 1) >= 0.45:
+            return False
+    if len(tamil_part) <= 2:
+        return False
+    return True
+
 def tokenize_tamil(text):
     """
     Extract Tamil words from text with three normalization passes:
@@ -1198,13 +1730,17 @@ def tokenize_tamil(text):
     The final filter is important for noisy textbook PDFs: compound splitting or
     OCR cleanup can sometimes leave a single combining mark / empty token.
     """
-    text = _fix_common_tamil_ocr_errors(text or '')
+    text = _remove_teacher_guidance_sections(
+        _remove_low_quality_ocr_pages(
+            _remove_tamil_textbook_noise_lines(_fix_common_tamil_ocr_errors(text or ''))
+        )
+    )
     raw = re.findall(r'[\u0B80-\u0BFF]{2,}', text)
     result = []
     for word in raw:
         for part in _split_compound(word):
             part = _normalize_word(part).strip()
-            if len(part) >= 2 and re.search(r'[\u0B80-\u0BFF]', part):
+            if _is_useful_tamil_ocr_token(part):
                 result.append(part)
     return result
 
@@ -1214,12 +1750,16 @@ def _tamil_words_only_text(text, words_per_line=1):
     Keep digits only when they are part of a Tamil token, such as 10ஆம்.
     Standalone real numbers, marks, years, and question numbers are ignored.
     """
-    words = re.findall(r'[0-9\u0BE6-\u0BEF\u0B80-\u0BFF]+', _fix_common_tamil_ocr_errors(text or ''))
+    text = _remove_teacher_guidance_sections(
+        _remove_low_quality_ocr_pages(
+            _remove_tamil_textbook_noise_lines(_fix_common_tamil_ocr_errors(text or ''))
+        )
+    )
+    words = re.findall(r'[0-9\u0BE6-\u0BEF\u0B80-\u0BFF]+', text)
     cleaned = []
     for word in words:
         word = _normalize_word(word).strip()
-        tamil_part = re.sub(r'[0-9\u0BE6-\u0BEF]', '', word)
-        if len(tamil_part) >= 2 and re.search(r'[\u0B80-\u0BFF]', tamil_part):
+        if _is_useful_tamil_ocr_token(word):
             cleaned.append(word)
 
     lines = []
